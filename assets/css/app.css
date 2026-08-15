@@ -483,7 +483,6 @@ button:disabled {
   gap: 18px;
   overflow-y: auto;
   scrollbar-gutter: stable;
-  scroll-behavior: smooth;
   background: #fafcfb;
 }
 
@@ -1427,10 +1426,6 @@ button:disabled {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .conversation-body {
-    scroll-behavior: auto;
-  }
-
   .activity-loader span,
   .activity-placeholder span,
   .streaming-cursor,

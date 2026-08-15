@@ -83,22 +83,34 @@ const ElapsedTime = {
 
 const ConversationScroll = {
   mounted() {
+    this.stickToBottom = true
+    this.handleScroll = () => {
+      this.stickToBottom = this.remainingScroll() < 80
+    }
+
+    this.el.addEventListener("scroll", this.handleScroll, {passive: true})
     this.scrollToBottom()
   },
 
   beforeUpdate() {
-    const remaining = this.el.scrollHeight - this.el.scrollTop - this.el.clientHeight
-    this.stickToBottom = remaining < 80
+    this.wasStickingToBottom = this.stickToBottom
   },
 
   updated() {
-    if (this.stickToBottom) this.scrollToBottom()
+    if (this.wasStickingToBottom) this.scrollToBottom()
+  },
+
+  destroyed() {
+    this.el.removeEventListener("scroll", this.handleScroll)
+  },
+
+  remainingScroll() {
+    return this.el.scrollHeight - this.el.scrollTop - this.el.clientHeight
   },
 
   scrollToBottom() {
-    window.requestAnimationFrame(() => {
-      this.el.scrollTop = this.el.scrollHeight
-    })
+    this.el.scrollTop = this.el.scrollHeight
+    this.stickToBottom = true
   },
 }
 

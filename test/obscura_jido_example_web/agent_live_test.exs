@@ -69,6 +69,12 @@ defmodule ObscuraJidoExampleWeb.AgentLiveTest do
     def run(_prompt, _vault, _opts), do: {:error, :unknown_provider_token}
   end
 
+  defmodule TimeoutRunner do
+    @moduledoc false
+
+    def run(_prompt, _vault, _opts), do: {:error, :agent_timeout}
+  end
+
   defmodule HistoryRunner do
     @moduledoc false
 
@@ -270,6 +276,26 @@ defmodule ObscuraJidoExampleWeb.AgentLiveTest do
     refute has_element?(view, ".safe-label:not(.pending)", "Tokenized")
 
     refute Process.alive?(runner)
+  end
+
+  test "restores the submitted request after the agent deadline expires", %{conn: conn} do
+    Application.put_env(:obscura_jido_example, :agent_runner, TimeoutRunner)
+    on_exit(fn -> Application.delete_env(:obscura_jido_example, :agent_runner) end)
+
+    {:ok, view, _html} = live(conn, "/")
+
+    view
+    |> form("#agent-form", agent: %{prompt: @prompt})
+    |> render_submit()
+
+    html = render_async(view, 1_000)
+
+    assert html =~ "The agent did not finish before the request deadline."
+    assert html =~ "Your request is ready to send again."
+    assert html =~ @prompt
+    assert has_element?(view, ".run-command", "Send")
+    refute has_element?(view, "#active-agent-run")
+    refute has_element?(view, "#cancel-agent-run")
   end
 
   test "keeps real protected history and clears it with the session vault", %{conn: conn} do

@@ -6,6 +6,7 @@ defmodule ObscuraJidoExample.AgentRunnerTest do
   require Jido.AI.Test
 
   alias ObscuraJidoExample.{AgentRunner, DemoScript, OpenAICredentialStore, Privacy}
+  alias ObscuraJidoExample.Jido, as: AppJido
 
   defmodule HistoryCaptureTransformer do
     @moduledoc false
@@ -14,6 +15,26 @@ defmodule ObscuraJidoExample.AgentRunnerTest do
       test_pid = Application.fetch_env!(:obscura_jido_example, :history_capture_pid)
       send(test_pid, {:provider_messages, request.messages})
       {:ok, %{}}
+    end
+  end
+
+  defmodule LifecycleGateTransformer do
+    @moduledoc false
+
+    def transform_request(_request, _state, _config, _runtime_context) do
+      case Application.get_env(:obscura_jido_example, :lifecycle_gate) do
+        {:pause, owner} when is_pid(owner) ->
+          send(owner, {:lifecycle_transformer_paused, self()})
+
+          receive do
+            :continue -> {:ok, %{}}
+          after
+            30_000 -> {:ok, %{}}
+          end
+
+        _continue ->
+          {:ok, %{}}
+      end
     end
   end
 
@@ -39,6 +60,83 @@ defmodule ObscuraJidoExample.AgentRunnerTest do
     assert result.display_answer =~ @raw_phone
     assert Enum.map(result.tool_steps, & &1.tool) == ["find_customer", "list_customer_cases"]
     assert result.vault_size == 3
+  end
+
+  test "stops the request-owned Jido runtime after a completed run", %{vault: vault} do
+    baseline = registered_agent_pids()
+    Application.put_env(:obscura_jido_example, :lifecycle_gate, {:pause, self()})
+    on_exit(fn -> Application.delete_env(:obscura_jido_example, :lifecycle_gate) end)
+
+    test_pid = self()
+    result_ref = make_ref()
+
+    {runner, runner_monitor} =
+      spawn_monitor(fn ->
+        result =
+          AgentRunner.run(@prompt, vault,
+            mode: :deterministic,
+            request_transformer: LifecycleGateTransformer
+          )
+
+        send(test_pid, {result_ref, result})
+      end)
+
+    assert_receive {:lifecycle_transformer_paused, transformer}, 3_000
+    runtime = request_runtime(baseline)
+
+    Application.put_env(:obscura_jido_example, :lifecycle_gate, :continue)
+    send(transformer, :continue)
+
+    assert_receive {^result_ref, {:ok, _result}}, 5_000
+    assert_receive {:DOWN, ^runner_monitor, :process, ^runner, :normal}, 1_000
+
+    assert_runtime_stopped(runtime)
+    assert Process.alive?(self())
+  end
+
+  test "cancelling the runner stops its Jido agent, worker, and task supervisor", %{vault: vault} do
+    baseline = registered_agent_pids()
+    Application.put_env(:obscura_jido_example, :lifecycle_gate, {:pause, self()})
+    on_exit(fn -> Application.delete_env(:obscura_jido_example, :lifecycle_gate) end)
+
+    {runner, runner_monitor} =
+      spawn_monitor(fn ->
+        AgentRunner.run(@prompt, vault,
+          mode: :deterministic,
+          request_transformer: LifecycleGateTransformer,
+          timeout: 30_000
+        )
+      end)
+
+    assert_receive {:lifecycle_transformer_paused, transformer}, 3_000
+    runtime = request_runtime(baseline)
+
+    Process.exit(runner, :shutdown)
+
+    assert_receive {:DOWN, ^runner_monitor, :process, ^runner, :shutdown}, 1_000
+    assert_runtime_stopped([transformer | runtime])
+  end
+
+  test "enforces one deadline across streaming and awaiting", %{vault: vault} do
+    baseline = registered_agent_pids()
+    Application.put_env(:obscura_jido_example, :lifecycle_gate, {:pause, self()})
+    on_exit(fn -> Application.delete_env(:obscura_jido_example, :lifecycle_gate) end)
+
+    started_at = System.monotonic_time(:millisecond)
+
+    assert {:error, :agent_timeout} =
+             AgentRunner.run(@prompt, vault,
+               mode: :deterministic,
+               request_transformer: LifecycleGateTransformer,
+               timeout: 100
+             )
+
+    elapsed_ms = System.monotonic_time(:millisecond) - started_at
+    assert elapsed_ms < 750
+
+    assert_receive {:lifecycle_transformer_paused, transformer}, 3_000
+    assert_eventually(fn -> not Process.alive?(transformer) end)
+    assert_eventually(fn -> registered_agent_pids() == baseline end)
   end
 
   test "emits privacy-safe progress from the real Jido runtime", %{vault: vault} do
@@ -296,6 +394,57 @@ defmodule ObscuraJidoExample.AgentRunnerTest do
       {AgentRunner, ^run_ref, event} -> drain_progress(run_ref, [event | acc])
     after
       0 -> Enum.reverse(acc)
+    end
+  end
+
+  defp registered_agent_pids do
+    AppJido.list_agents()
+    |> Enum.map(&elem(&1, 1))
+    |> MapSet.new()
+  end
+
+  defp request_runtime(baseline) do
+    entries =
+      AppJido.list_agents()
+      |> Enum.reject(fn {_id, pid} -> MapSet.member?(baseline, pid) end)
+
+    assert entries != []
+
+    {_id, agent_pid} =
+      Enum.find(entries, fn {id, _pid} -> not String.ends_with?(id, "/react_worker") end)
+
+    assert {:ok, state} = Jido.AgentServer.state(agent_pid)
+    task_supervisor = get_in(state.agent.state, [:__task_supervisor_skill__, :supervisor])
+
+    runtime_supervisor =
+      get_in(state.agent.state, [:__strategy__, :config, :runtime_task_supervisor])
+
+    assert is_pid(task_supervisor)
+    assert runtime_supervisor == task_supervisor
+
+    [task_supervisor | Enum.map(entries, &elem(&1, 1))]
+  end
+
+  defp assert_runtime_stopped(pids) do
+    assert_eventually(fn -> Enum.all?(pids, &(not Process.alive?(&1))) end)
+  end
+
+  defp assert_eventually(fun, timeout \\ 1_000) do
+    deadline = System.monotonic_time(:millisecond) + timeout
+    do_assert_eventually(fun, deadline)
+  end
+
+  defp do_assert_eventually(fun, deadline) do
+    cond do
+      fun.() ->
+        :ok
+
+      System.monotonic_time(:millisecond) >= deadline ->
+        flunk("condition did not become true before timeout")
+
+      true ->
+        Process.sleep(10)
+        do_assert_eventually(fun, deadline)
     end
   end
 

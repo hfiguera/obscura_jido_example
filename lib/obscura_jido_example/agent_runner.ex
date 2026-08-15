@@ -102,59 +102,81 @@ defmodule ObscuraJidoExample.AgentRunner do
 
   defp execute(protected_prompt, history, vault, mode, opts) do
     timeout = Keyword.get(opts, :timeout, agent_config() |> Keyword.get(:timeout, 60_000))
+    deadline = monotonic_ms() + timeout
     progress_to = Keyword.get(opts, :progress_to)
 
     with {:ok, mode_opts} <- mode_options(mode, protected_prompt, history, vault, opts) do
       request_opts =
         Keyword.merge(mode_opts,
           allowed_tools: @allowed_tools,
-          tool_context: %{vault: vault, audit_pid: self()},
-          stream_event_timeout_ms: timeout,
-          timeout: timeout
+          tool_context: %{vault: vault, audit_pid: self()}
         )
         |> maybe_put_request_transformer(opts)
 
-      with {:ok, pid} <-
-             Jido.AgentServer.start(
-               jido: ObscuraJidoExample.Jido,
-               agent: SupportAgent,
-               initial_state: %{context: provider_context(history)}
-             ) do
-        try do
-          run_request(pid, protected_prompt, request_opts, timeout, progress_to)
-        after
-          stop_agent(pid)
-        end
+      with {:ok, pid} <- start_agent(history) do
+        run_owned_agent(pid, fn ->
+          run_request(pid, protected_prompt, request_opts, deadline, progress_to)
+        end)
       else
         _ -> {:error, :agent_unavailable}
       end
     end
   end
 
-  defp run_request(pid, prompt, request_opts, timeout, progress_to) do
-    with {:ok, %{request: request, events: event_stream}} <-
-           SupportAgent.ask_stream(pid, prompt, request_opts),
-         {:ok, provider_text_emitted?} <- collect_events(event_stream, progress_to),
-         {:ok, answer} <- SupportAgent.await(request, timeout: timeout),
-         {:ok, text} <- answer_text(answer),
-         :ok <- ensure_provider_text_progress(progress_to, text, provider_text_emitted?) do
-      {:ok, text, collect_tool_audits([])}
+  defp run_request(pid, prompt, request_opts, deadline, progress_to) do
+    with {:ok, request_timeout} <- remaining_timeout(deadline),
+         request_opts <- put_request_timeouts(request_opts, request_timeout),
+         request_opts <- Keyword.put(request_opts, :stream_to, {:pid, self()}),
+         {:ok, request} <- SupportAgent.ask(pid, prompt, request_opts) do
+      finish_request(pid, request, progress_to, deadline)
     else
+      {:error, :agent_timeout} -> {:error, :agent_timeout}
       _ -> {:error, :agent_failed}
     end
   end
 
-  defp collect_events(stream, progress_to) do
-    state =
-      stream
-      |> Enum.reduce(stream_state(), fn event, state ->
-        consume_event(event, state, progress_to)
-      end)
-      |> flush_deltas(progress_to)
+  defp finish_request(pid, request, progress_to, deadline) do
+    case collect_events(request.id, progress_to, deadline, stream_state()) do
+      {:ok, provider_text_emitted?} ->
+        with {:ok, await_timeout} <- remaining_timeout(deadline),
+             {:ok, answer} <- SupportAgent.await(request, timeout: await_timeout),
+             {:ok, text} <- answer_text(answer),
+             :ok <- ensure_provider_text_progress(progress_to, text, provider_text_emitted?) do
+          {:ok, text, collect_tool_audits([])}
+        else
+          {:error, :agent_timeout} ->
+            cancel_request(pid, request.id, :deadline_exceeded)
+            {:error, :agent_timeout}
 
-    {:ok, state.provider_text_emitted?}
-  rescue
-    _ -> {:error, :agent_failed}
+          _error ->
+            {:error, :agent_failed}
+        end
+
+      {:error, :agent_timeout} ->
+        cancel_request(pid, request.id, :deadline_exceeded)
+        {:error, :agent_timeout}
+
+      _error ->
+        {:error, :agent_failed}
+    end
+  end
+
+  defp collect_events(request_id, progress_to, deadline, state) do
+    with {:ok, timeout} <- remaining_timeout(deadline) do
+      receive do
+        {:jido_ai_request_event, %{request_id: ^request_id} = event} ->
+          state = consume_event(event, state, progress_to)
+
+          if state.terminal? do
+            state = flush_deltas(state, progress_to)
+            {:ok, state.provider_text_emitted?}
+          else
+            collect_events(request_id, progress_to, deadline, state)
+          end
+      after
+        timeout -> {:error, :agent_timeout}
+      end
+    end
   end
 
   defp stream_state do
@@ -162,7 +184,8 @@ defmodule ObscuraJidoExample.AgentRunner do
       pending_deltas: [],
       pending_bytes: 0,
       last_flush_ms: monotonic_ms(),
-      provider_text_emitted?: false
+      provider_text_emitted?: false,
+      terminal?: false
     }
   end
 
@@ -222,6 +245,13 @@ defmodule ObscuraJidoExample.AgentRunner do
     end
 
     state
+  end
+
+  defp consume_event(%{kind: kind}, state, progress_to)
+       when kind in [:request_completed, :request_failed, :request_cancelled] do
+    state
+    |> flush_deltas(progress_to)
+    |> Map.put(:terminal?, true)
   end
 
   defp consume_event(_event, state, progress_to), do: flush_deltas(state, progress_to)
@@ -298,6 +328,27 @@ defmodule ObscuraJidoExample.AgentRunner do
   defp emit_progress_to(_progress_to, _event), do: :ok
 
   defp monotonic_ms, do: System.monotonic_time(:millisecond)
+
+  defp remaining_timeout(deadline) do
+    case deadline - monotonic_ms() do
+      remaining when remaining > 0 -> {:ok, remaining}
+      _expired -> {:error, :agent_timeout}
+    end
+  end
+
+  defp put_request_timeouts(request_opts, timeout) do
+    Keyword.merge(request_opts,
+      stream_timeout_ms: timeout,
+      timeout: timeout
+    )
+  end
+
+  defp cancel_request(pid, request_id, reason) do
+    SupportAgent.cancel(pid, request_id: request_id, reason: reason)
+    :ok
+  catch
+    :exit, _ -> :ok
+  end
 
   defp collect_tool_audits(acc) do
     receive do
@@ -405,6 +456,7 @@ defmodule ObscuraJidoExample.AgentRunner do
               :invalid_mode,
               :openai_unavailable,
               :agent_unavailable,
+              :agent_timeout,
               :unknown_provider_token,
               :invalid_history
             ],
@@ -421,10 +473,72 @@ defmodule ObscuraJidoExample.AgentRunner do
     end
   end
 
+  defp start_agent(history) do
+    Jido.AgentServer.start_link(
+      jido: ObscuraJidoExample.Jido,
+      agent: SupportAgent,
+      initial_state: %{context: provider_context(history)}
+    )
+  end
+
+  defp run_owned_agent(pid, fun) do
+    outcome =
+      try do
+        {:returned, fun.()}
+      catch
+        kind, reason -> {:raised, kind, reason, __STACKTRACE__}
+      end
+
+    case outcome do
+      {:returned, {:error, :agent_timeout} = result} ->
+        shutdown_agent(pid)
+        result
+
+      {:returned, result} ->
+        stop_agent(pid)
+        result
+
+      {:raised, kind, reason, stacktrace} ->
+        stop_agent(pid)
+        :erlang.raise(kind, reason, stacktrace)
+    end
+  end
+
   defp stop_agent(pid) do
-    if Process.alive?(pid), do: GenServer.stop(pid, :normal, 5_000)
+    Process.unlink(pid)
+
+    if Process.alive?(pid) do
+      GenServer.stop(pid, :normal, 5_000)
+    end
+
     :ok
   catch
-    :exit, _ -> :ok
+    :exit, _ ->
+      if Process.alive?(pid), do: Process.exit(pid, :kill)
+      :ok
+  end
+
+  defp shutdown_agent(pid) do
+    Process.unlink(pid)
+
+    if Process.alive?(pid) do
+      monitor = Process.monitor(pid)
+      Process.exit(pid, :shutdown)
+
+      receive do
+        {:DOWN, ^monitor, :process, ^pid, _reason} -> :ok
+      after
+        100 ->
+          Process.exit(pid, :kill)
+
+          receive do
+            {:DOWN, ^monitor, :process, ^pid, _reason} -> :ok
+          after
+            100 -> Process.demonitor(monitor, [:flush])
+          end
+      end
+    end
+
+    :ok
   end
 end
