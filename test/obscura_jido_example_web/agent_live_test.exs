@@ -69,6 +69,44 @@ defmodule ObscuraJidoExampleWeb.AgentLiveTest do
     def run(_prompt, _vault, _opts), do: {:error, :unknown_provider_token}
   end
 
+  defmodule HistoryRunner do
+    @moduledoc false
+
+    alias ObscuraJidoExample.AgentRunner
+
+    def run(prompt, _vault, opts) do
+      history = Keyword.fetch!(opts, :history)
+      test_pid = Application.fetch_env!(:obscura_jido_example, :history_test_pid)
+      send(test_pid, {:runner_history, prompt, history})
+
+      {protected_prompt, provider_answer, display_answer} = response(prompt)
+
+      {:ok,
+       %AgentRunner.Result{
+         mode: :deterministic,
+         model: "History test boundary",
+         protected_prompt: protected_prompt,
+         provider_answer: provider_answer,
+         display_answer: display_answer,
+         tool_steps: [],
+         vault_size: if(history == [], do: 1, else: 3),
+         elapsed_ms: 10
+       }}
+    end
+
+    defp response(prompt) do
+      if String.contains?(prompt, "rachel.chen@example.test") do
+        {
+          "Find <<EMAIL_001>>",
+          "Found <<EMAIL_001>>.",
+          "Found rachel.chen@example.test."
+        }
+      else
+        {prompt, "The case is still waiting on support.", "The case is still waiting on support."}
+      end
+    end
+  end
+
   @prompt "Find rachel.chen@example.test and summarize her support cases. Her phone is +1 202-555-0188."
 
   test "loading the synthetic case replaces a client-edited prompt", %{conn: conn} do
@@ -164,16 +202,60 @@ defmodule ObscuraJidoExampleWeb.AgentLiveTest do
     refute html =~ ~s(id="active-agent-run")
   end
 
-  test "clears session mappings and removes the restored conversation", %{conn: conn} do
+  test "keeps real protected history and clears it with the session vault", %{conn: conn} do
+    Application.put_env(:obscura_jido_example, :agent_runner, HistoryRunner)
+    Application.put_env(:obscura_jido_example, :history_test_pid, self())
+
+    on_exit(fn ->
+      Application.delete_env(:obscura_jido_example, :agent_runner)
+      Application.delete_env(:obscura_jido_example, :history_test_pid)
+    end)
+
     {:ok, view, _html} = live(conn, "/")
 
     view
     |> form("#agent-form", agent: %{prompt: @prompt})
     |> render_submit()
 
-    assert render_async(view, 5_000) =~ "3 mappings"
-    assert view |> element("#clear-vault") |> render_click() =~ "0 mappings"
-    refute render(view) =~ "Rachel Chen"
+    assert_receive {:runner_history, @prompt, []}, 1_000
+    assert render_async(view, 1_000) =~ "1 turn · 1 mapping"
+
+    follow_up = "What is her current support case status?"
+
+    view
+    |> form("#agent-form", agent: %{prompt: follow_up})
+    |> render_submit()
+
+    assert_receive {:runner_history, ^follow_up, history}, 1_000
+
+    assert history == [
+             %{role: :user, content: "Find <<EMAIL_001>>"},
+             %{role: :assistant, content: "Found <<EMAIL_001>>."}
+           ]
+
+    refute inspect(history) =~ "rachel.chen@example.test"
+
+    html = render_async(view, 1_000)
+    assert html =~ "2 turns · 3 mappings"
+    assert html =~ "2 prior protected messages"
+    assert html =~ @prompt
+    assert html =~ follow_up
+    assert html =~ "Found rachel.chen@example.test."
+    assert html =~ "The case is still waiting on support."
+    assert has_element?(view, "#conversation-turn-1")
+    assert has_element?(view, "#conversation-turn-2")
+
+    html = view |> element("#new-conversation") |> render_click()
+    assert html =~ "0 turns · 0 mappings"
+    refute html =~ "rachel.chen@example.test"
+    refute html =~ follow_up
+
+    view
+    |> form("#agent-form", agent: %{prompt: "Hello"})
+    |> render_submit()
+
+    assert_receive {:runner_history, "Hello", []}, 1_000
+    assert render_async(view, 1_000) =~ "1 turn · 1 mapping"
   end
 
   test "keeps OpenAI disabled when credentials are absent", %{conn: conn} do

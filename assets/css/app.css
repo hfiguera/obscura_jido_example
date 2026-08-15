@@ -464,12 +464,23 @@ button:disabled {
 
 .conversation-body {
   min-height: 420px;
+  max-height: min(68vh, 680px);
   flex: 1;
   padding: 28px;
   display: flex;
   flex-direction: column;
   gap: 18px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scroll-behavior: smooth;
   background: #fafcfb;
+}
+
+.conversation-turn {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .empty-conversation {
@@ -1114,6 +1125,13 @@ button:disabled {
   line-height: 1.5;
 }
 
+.provider-context-note {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
 .answer-inspector pre {
   color: #294b50;
   background: #f3f8f8;
@@ -1253,6 +1271,7 @@ button:disabled {
 
   .conversation-body {
     min-height: 330px;
+    max-height: 560px;
     padding: 14px;
   }
 
@@ -1296,6 +1315,10 @@ button:disabled {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .conversation-body {
+    scroll-behavior: auto;
+  }
+
   .activity-loader span,
   .activity-placeholder span,
   .streaming-cursor,

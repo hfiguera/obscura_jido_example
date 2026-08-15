@@ -15,6 +15,7 @@ to combine:
 
 - Obscura's deterministic PII detection and session-scoped vault;
 - reversible pseudonymization before an agent or model sees a request;
+- bounded multi-turn context containing only protected prompts and tokenized answers;
 - trusted tool execution with locally rehydrated lookup keys;
 - protected tool results and local response rehydration;
 - payload-free Jido and ReqLLM telemetry settings;
@@ -29,9 +30,10 @@ Browser (raw request)
 Obscura + session vault
         |  <<EMAIL_001>>, <<PHONE_001>>
         v
-Jido agent -----> OpenAI or deterministic model boundary
-        |
-        v
+Bounded protected history -----> Jido agent
+                                      |  \
+                                      |   +--> OpenAI or deterministic model boundary
+                                      v
 Trusted read-only tools
         |  rehydrate lookup key locally, protect returned PII
         v
@@ -41,12 +43,20 @@ Jido answer with pseudonyms
 Local rehydration -> trusted LiveView
 ```
 
+Each request runs in a fresh Jido process. Before a follow-up request starts,
+the application restores at most six completed turns into that process using
+only protected prompts and tokenized provider answers. Raw prompts and restored
+answers remain in the trusted LiveView transcript. This lets the model reuse a
+stable reference such as `<<EMAIL_001>>` across turns without receiving the
+underlying email address.
+
 The trusted local Jido runtime holds the vault PID only as tool context. The
 PID and its mappings are not included in provider-visible prompts or tool
 payloads, so the remote model never receives the vault or a raw customer
 record. Tool schemas accept only a session pseudonym or a synthetic customer
-reference. The vault exists for one connected LiveView session and is cleared
-on demand or when the LiveView process exits.
+reference. The vault and bounded conversation exist for one connected LiveView
+session. Starting a new conversation clears both while leaving the separately
+managed OpenAI session credential unchanged.
 
 ## Run Locally
 
@@ -98,6 +108,7 @@ mix assets.build
 The test suite verifies that:
 
 - provider-bound prompts and answers contain pseudonyms, not raw canaries;
+- follow-up model requests receive bounded protected history and no raw transcript values;
 - trusted tools rehydrate only the lookup value they require;
 - tool results are protected before returning to Jido;
 - the trusted UI can restore known mappings;

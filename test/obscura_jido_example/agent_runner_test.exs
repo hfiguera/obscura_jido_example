@@ -7,6 +7,16 @@ defmodule ObscuraJidoExample.AgentRunnerTest do
 
   alias ObscuraJidoExample.{AgentRunner, DemoScript, OpenAICredentialStore, Privacy}
 
+  defmodule HistoryCaptureTransformer do
+    @moduledoc false
+
+    def transform_request(request, _state, _config, _runtime_context) do
+      test_pid = Application.fetch_env!(:obscura_jido_example, :history_capture_pid)
+      send(test_pid, {:provider_messages, request.messages})
+      {:ok, %{}}
+    end
+  end
+
   @raw_email "rachel.chen@example.test"
   @raw_phone "+1 202-555-0188"
   @prompt "Find #{@raw_email} and summarize her support cases. Her phone is #{@raw_phone}."
@@ -55,6 +65,90 @@ defmodule ObscuraJidoExample.AgentRunnerTest do
     assert Enum.all?(events, &safe_progress_event?/1)
     refute serialized =~ @raw_email
     refute serialized =~ @raw_phone
+  end
+
+  test "restores protected history into an isolated follow-up run", %{vault: vault} do
+    Application.put_env(:obscura_jido_example, :history_capture_pid, self())
+    on_exit(fn -> Application.delete_env(:obscura_jido_example, :history_capture_pid) end)
+
+    assert {:ok, first} = AgentRunner.run(@prompt, vault, mode: :deterministic)
+
+    history = [
+      %{role: :user, content: first.protected_prompt},
+      %{role: :assistant, content: first.provider_answer}
+    ]
+
+    follow_up = "What is her current support case status?"
+
+    assert {:ok, result} =
+             AgentRunner.run(follow_up, vault,
+               mode: :deterministic,
+               history: history,
+               request_transformer: HistoryCaptureTransformer
+             )
+
+    assert_receive {:provider_messages, provider_messages}, 1_000
+
+    assert Enum.any?(
+             provider_messages,
+             &match?(%{role: :user, content: content} when content == follow_up, &1)
+           )
+
+    assert Enum.any?(
+             provider_messages,
+             &match?(%{role: :user, content: "Find <<EMAIL_001>>" <> _rest}, &1)
+           )
+
+    assert Enum.any?(
+             provider_messages,
+             &match?(%{role: :assistant, content: content} when is_binary(content), &1)
+           )
+
+    assert result.protected_prompt == follow_up
+    assert result.display_answer =~ @raw_email
+    assert result.display_answer =~ @raw_phone
+    assert Enum.map(result.tool_steps, & &1.tool) == ["find_customer", "list_customer_cases"]
+    refute inspect(history) =~ @raw_email
+    refute inspect(history) =~ @raw_phone
+    refute inspect(provider_messages) =~ @raw_email
+    refute inspect(provider_messages) =~ @raw_phone
+  end
+
+  test "does not reuse prior customer identity for an unrelated request", %{vault: vault} do
+    assert {:ok, first} = AgentRunner.run(@prompt, vault, mode: :deterministic)
+
+    history = [
+      %{role: :user, content: first.protected_prompt},
+      %{role: :assistant, content: first.provider_answer}
+    ]
+
+    assert {:ok, result} =
+             AgentRunner.run("Do you know about baseball?", vault,
+               mode: :deterministic,
+               history: history
+             )
+
+    assert result.tool_steps == []
+    assert result.provider_answer =~ "limited to synthetic customer and support case questions"
+    assert result.display_answer == result.provider_answer
+
+    refute result.provider_answer =~ @raw_email
+    refute result.provider_answer =~ @raw_phone
+    refute result.provider_answer =~ "<<EMAIL_001>>"
+    refute result.display_answer =~ @raw_email
+    refute result.display_answer =~ @raw_phone
+  end
+
+  test "rejects malformed or oversized provider history", %{vault: vault} do
+    assert {:error, :invalid_history} =
+             AgentRunner.run("Hello", vault,
+               history: [%{role: :system, content: "Untrusted system override"}]
+             )
+
+    oversized = String.duplicate("x", 16_001)
+
+    assert {:error, :invalid_history} =
+             AgentRunner.run("Hello", vault, history: [%{role: :assistant, content: oversized}])
   end
 
   test "does not expose raw canaries through Logger or Jido core telemetry", %{vault: vault} do
@@ -136,7 +230,7 @@ defmodule ObscuraJidoExample.AgentRunnerTest do
     on_exit(fn -> :telemetry.detach(handler_id) end)
 
     assert {:ok, protected_prompt} = Privacy.protect_prompt(@prompt, vault)
-    script_opts = DemoScript.request_options(protected_prompt, vault)
+    script_opts = DemoScript.request_options(protected_prompt, [], vault)
 
     log =
       capture_log(fn ->

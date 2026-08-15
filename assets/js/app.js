@@ -81,11 +81,32 @@ const ElapsedTime = {
   },
 }
 
+const ConversationScroll = {
+  mounted() {
+    this.scrollToBottom()
+  },
+
+  beforeUpdate() {
+    const remaining = this.el.scrollHeight - this.el.scrollTop - this.el.clientHeight
+    this.stickToBottom = remaining < 80
+  },
+
+  updated() {
+    if (this.stickToBottom) this.scrollToBottom()
+  },
+
+  scrollToBottom() {
+    window.requestAnimationFrame(() => {
+      this.el.scrollTop = this.el.scrollHeight
+    })
+  },
+}
+
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: {_csrf_token: csrfToken},
-  hooks: {...colocatedHooks, AutoDismissFlash, ElapsedTime, SecretInput},
+  hooks: {...colocatedHooks, AutoDismissFlash, ConversationScroll, ElapsedTime, SecretInput},
 })
 
 // Show progress bar on live navigation and form submits

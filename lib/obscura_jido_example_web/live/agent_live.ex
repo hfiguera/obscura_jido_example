@@ -5,7 +5,8 @@ defmodule ObscuraJidoExampleWeb.AgentLive do
 
   alias Obscura.Vault
   alias Obscura.Vault.Memory
-  alias ObscuraJidoExample.{AgentRunner, OpenAICredentialStore}
+  alias ObscuraJidoExample.{AgentRunner, Conversation, OpenAICredentialStore}
+  alias ObscuraJidoExample.Conversation.Turn
   alias ObscuraJidoExampleWeb.Markdown
 
   @sample_prompt "Find rachel.chen@example.test and summarize her support cases. Her phone is +1 202-555-0188."
@@ -26,7 +27,10 @@ defmodule ObscuraJidoExampleWeb.AgentLive do
       |> assign(:configured_model, AgentRunner.configured_model())
       |> assign(:running?, false)
       |> assign(:result, nil)
-      |> assign(:messages, [])
+      |> assign(:turns, [])
+      |> assign(:turn_sequence, 0)
+      |> assign(:pending_prompt, nil)
+      |> assign(:provider_context_message_count, 0)
       |> assign(:run_ref, nil)
       |> assign(:run_started_at, nil)
       |> assign(:activity_phase, nil)
@@ -73,6 +77,7 @@ defmodule ObscuraJidoExampleWeb.AgentLive do
       vault = socket.assigns.vault
       mode = socket.assigns.mode
       credential_ref = socket.assigns.openai_credential_ref
+      history = Conversation.provider_messages(socket.assigns.turns)
       live_view = self()
       run_ref = make_ref()
       runner = runner_module()
@@ -81,7 +86,8 @@ defmodule ObscuraJidoExampleWeb.AgentLive do
         socket
         |> assign(:running?, true)
         |> assign(:result, nil)
-        |> assign(:messages, [])
+        |> assign(:pending_prompt, prompt)
+        |> assign(:provider_context_message_count, length(history))
         |> assign(:run_ref, run_ref)
         |> assign(:run_started_at, System.system_time(:millisecond))
         |> assign(:activity_phase, :protecting)
@@ -94,6 +100,7 @@ defmodule ObscuraJidoExampleWeb.AgentLive do
           runner.run(prompt, vault,
             mode: mode,
             credential_ref: credential_ref,
+            history: history,
             progress_to: {live_view, run_ref}
           )
         end)
@@ -102,24 +109,32 @@ defmodule ObscuraJidoExampleWeb.AgentLive do
     end
   end
 
-  def handle_event("clear_vault", _params, %{assigns: %{running?: false, vault: vault}} = socket)
+  def handle_event(
+        "new_conversation",
+        _params,
+        %{assigns: %{running?: false, vault: vault}} = socket
+      )
       when not is_nil(vault) do
     case Vault.clear(vault) do
       :ok ->
         {:noreply,
          socket
          |> assign(:result, nil)
-         |> assign(:messages, [])
+         |> assign(:turns, [])
+         |> assign(:turn_sequence, 0)
+         |> assign(:pending_prompt, nil)
+         |> assign(:provider_context_message_count, 0)
          |> assign(:vault_size, 0)
          |> assign(:error, nil)
-         |> assign_form(@sample_prompt)}
+         |> update(:prompt_revision, &(&1 + 1))
+         |> assign_form("")}
 
       {:error, _reason} ->
         {:noreply, assign(socket, error: "The session vault could not be cleared.")}
     end
   end
 
-  def handle_event("clear_vault", _params, socket), do: {:noreply, socket}
+  def handle_event("new_conversation", _params, socket), do: {:noreply, socket}
 
   @impl true
   def handle_info(
@@ -133,20 +148,23 @@ defmodule ObscuraJidoExampleWeb.AgentLive do
 
   @impl true
   def handle_async(:agent_run, {:ok, {:ok, result}}, socket) do
-    messages = [
-      %{role: :user, content: result.protected_prompt, label: "Protected request"},
-      %{
-        role: :assistant,
-        content: Markdown.to_safe_html(result.display_answer),
-        label: "Trusted UI response"
-      }
-    ]
+    turn_sequence = socket.assigns.turn_sequence + 1
+
+    turn = %Turn{
+      id: turn_sequence,
+      trusted_prompt: socket.assigns.pending_prompt,
+      protected_prompt: result.protected_prompt,
+      provider_answer: result.provider_answer,
+      display_html: Markdown.to_safe_html(result.display_answer)
+    }
 
     {:noreply,
      assign(socket,
        running?: false,
        result: result,
-       messages: messages,
+       turns: Conversation.append(socket.assigns.turns, turn),
+       turn_sequence: turn_sequence,
+       pending_prompt: nil,
        run_ref: nil,
        run_started_at: nil,
        activity_phase: nil,
@@ -169,6 +187,7 @@ defmodule ObscuraJidoExampleWeb.AgentLive do
        openai_available?: false,
        openai_session?: false,
        openai_credential_ref: nil,
+       pending_prompt: nil,
        error: "The session OpenAI key is unavailable or expired."
      )}
   end
@@ -248,6 +267,7 @@ defmodule ObscuraJidoExampleWeb.AgentLive do
       run_ref: nil,
       run_started_at: nil,
       activity_phase: nil,
+      pending_prompt: nil,
       error: message
     )
   end
@@ -313,6 +333,21 @@ defmodule ObscuraJidoExampleWeb.AgentLive do
 
   defp provider_payload(%{provider_stream: text}) when is_binary(text) and text != "", do: text
   defp provider_payload(_assigns), do: "No response received"
+
+  defp provider_context_summary(%{provider_context_message_count: count}) do
+    case count do
+      0 -> "No prior provider context"
+      1 -> "1 prior protected message"
+      count -> "#{count} prior protected messages"
+    end
+  end
+
+  defp conversation_summary(%{turns: turns, vault_size: vault_size}) do
+    turns = Conversation.count(turns)
+    turn_label = if turns == 1, do: "1 turn", else: "#{turns} turns"
+    mapping_label = if vault_size == 1, do: "1 mapping", else: "#{vault_size} mappings"
+    "#{turn_label} · #{mapping_label}"
+  end
 
   defp boundary_step_class(assigns, :trusted_ui) do
     if assigns.running? or assigns.result, do: "complete"

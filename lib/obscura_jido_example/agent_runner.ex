@@ -1,5 +1,7 @@
 defmodule ObscuraJidoExample.AgentRunner do
-  @moduledoc "Runs one isolated Jido request across the Obscura boundary."
+  @moduledoc "Runs an isolated Jido request with bounded, protected context."
+
+  alias Jido.AI.Context
 
   alias ObscuraJidoExample.{
     DemoScript,
@@ -25,6 +27,9 @@ defmodule ObscuraJidoExample.AgentRunner do
   end
 
   @max_prompt_bytes 4_000
+  @max_history_messages 12
+  @max_history_message_bytes 16_000
+  @max_history_bytes 64_000
   @allowed_tools ["find_customer", "list_customer_cases"]
   @credential_header "x-obscura-openai-credential-ref"
   @session_key_placeholder "obscura-session-key-resolved-at-request-time"
@@ -47,15 +52,18 @@ defmodule ObscuraJidoExample.AgentRunner do
   def run(prompt, vault, opts) when is_binary(prompt) do
     started_at = System.monotonic_time(:millisecond)
     mode = Keyword.get(opts, :mode, :deterministic)
+    history = Keyword.get(opts, :history, [])
 
     emit_progress(opts, {:phase, :protecting})
 
     with :ok <- validate_prompt(prompt),
          :ok <- validate_mode(mode),
          :ok <- ensure_provider(mode, opts),
+         {:ok, history} <- normalize_history(history),
          {:ok, protected_prompt} <- Privacy.protect_prompt(prompt, vault),
          :ok <- emit_protected_prompt(opts, protected_prompt),
-         {:ok, provider_answer, tool_steps} <- execute(protected_prompt, vault, mode, opts),
+         {:ok, provider_answer, tool_steps} <-
+           execute(protected_prompt, history, vault, mode, opts),
          :ok <- emit_restoring(opts),
          {:ok, display_answer} <- Privacy.restore(provider_answer, vault) do
       {:ok,
@@ -92,11 +100,11 @@ defmodule ObscuraJidoExample.AgentRunner do
     agent_config() |> Keyword.get(:model, "openai:gpt-5.6-luna")
   end
 
-  defp execute(protected_prompt, vault, mode, opts) do
+  defp execute(protected_prompt, history, vault, mode, opts) do
     timeout = Keyword.get(opts, :timeout, agent_config() |> Keyword.get(:timeout, 60_000))
     progress_to = Keyword.get(opts, :progress_to)
 
-    with {:ok, mode_opts} <- mode_options(mode, protected_prompt, vault, opts) do
+    with {:ok, mode_opts} <- mode_options(mode, protected_prompt, history, vault, opts) do
       request_opts =
         Keyword.merge(mode_opts,
           allowed_tools: @allowed_tools,
@@ -104,9 +112,14 @@ defmodule ObscuraJidoExample.AgentRunner do
           stream_event_timeout_ms: timeout,
           timeout: timeout
         )
+        |> maybe_put_request_transformer(opts)
 
       with {:ok, pid} <-
-             Jido.AgentServer.start(jido: ObscuraJidoExample.Jido, agent: SupportAgent) do
+             Jido.AgentServer.start(
+               jido: ObscuraJidoExample.Jido,
+               agent: SupportAgent,
+               initial_state: %{context: provider_context(history)}
+             ) do
         try do
           run_request(pid, protected_prompt, request_opts, timeout, progress_to)
         after
@@ -286,10 +299,10 @@ defmodule ObscuraJidoExample.AgentRunner do
   defp answer_text(%{"result" => answer}) when is_binary(answer), do: {:ok, answer}
   defp answer_text(_answer), do: {:error, :invalid_agent_answer}
 
-  defp mode_options(:deterministic, prompt, vault, _opts),
-    do: {:ok, DemoScript.request_options(prompt, vault)}
+  defp mode_options(:deterministic, prompt, history, vault, _opts),
+    do: {:ok, DemoScript.request_options(prompt, history, vault)}
 
-  defp mode_options(:openai, _prompt, _vault, opts) do
+  defp mode_options(:openai, _prompt, _history, _vault, opts) do
     credential_ref = Keyword.get(opts, :credential_ref)
     llm_opts = request_llm_opts(opts)
 
@@ -321,6 +334,44 @@ defmodule ObscuraJidoExample.AgentRunner do
   defp validate_mode(mode) when mode in [:deterministic, :openai], do: :ok
   defp validate_mode(_mode), do: {:error, :invalid_mode}
 
+  defp normalize_history(history)
+       when is_list(history) and length(history) <= @max_history_messages do
+    history
+    |> Enum.reduce_while({:ok, [], 0}, fn
+      %{role: role, content: content}, {:ok, acc, bytes}
+      when role in [:user, :assistant] and is_binary(content) ->
+        content_bytes = byte_size(content)
+
+        if String.valid?(content) and content_bytes <= @max_history_message_bytes and
+             bytes + content_bytes <= @max_history_bytes do
+          {:cont, {:ok, [%{role: role, content: content} | acc], bytes + content_bytes}}
+        else
+          {:halt, {:error, :invalid_history}}
+        end
+
+      _entry, _acc ->
+        {:halt, {:error, :invalid_history}}
+    end)
+    |> case do
+      {:ok, normalized, _bytes} -> {:ok, Enum.reverse(normalized)}
+      error -> error
+    end
+  end
+
+  defp normalize_history(_history), do: {:error, :invalid_history}
+
+  defp provider_context(history) do
+    Context.new()
+    |> Context.append_messages(history)
+  end
+
+  defp maybe_put_request_transformer(request_opts, opts) do
+    case Keyword.get(opts, :request_transformer) do
+      module when is_atom(module) -> Keyword.put(request_opts, :request_transformer, module)
+      _other -> request_opts
+    end
+  end
+
   defp ensure_provider(:deterministic, _opts), do: :ok
 
   defp ensure_provider(:openai, opts),
@@ -337,7 +388,8 @@ defmodule ObscuraJidoExample.AgentRunner do
               :invalid_mode,
               :openai_unavailable,
               :agent_unavailable,
-              :unknown_provider_token
+              :unknown_provider_token,
+              :invalid_history
             ],
        do: reason
 

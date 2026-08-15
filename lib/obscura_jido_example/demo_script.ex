@@ -9,23 +9,40 @@ defmodule ObscuraJidoExample.DemoScript do
   alias ObscuraJidoExample.{Privacy, Support.Store}
 
   @email_token ~r/<<EMAIL_\d{3}>>/
+  @support_request ~r/\b(account|case|customer|find|follow[ -]?up|invoice|lookup|plan|status|support|ticket|waiting|open|closed|resolved)\b/i
 
-  @spec request_options(String.t(), GenServer.server()) :: keyword()
-  def request_options(protected_prompt, vault) do
+  @spec request_options(String.t(), [map()], GenServer.server()) :: keyword()
+  def request_options(protected_prompt, history, vault) do
     try do
       protected_prompt
-      |> build(vault)
+      |> build(history, vault)
       |> Jido.AI.Test.react_opts()
     after
       Jido.AI.Test.reset_react_scripts()
     end
   end
 
-  defp build(protected_prompt, vault) do
-    case Regex.run(@email_token, protected_prompt) do
-      [email_token] -> build_customer_script(protected_prompt, email_token, vault)
-      nil -> build_missing_identifier_script(protected_prompt)
+  defp build(protected_prompt, history, vault) do
+    if support_request?(protected_prompt) do
+      case find_email_token(protected_prompt, history) do
+        {:ok, email_token} -> build_customer_script(protected_prompt, email_token, vault)
+        nil -> build_missing_identifier_script(protected_prompt)
+      end
+    else
+      build_out_of_scope_script(protected_prompt)
     end
+  end
+
+  defp support_request?(protected_prompt), do: Regex.match?(@support_request, protected_prompt)
+
+  defp find_email_token(protected_prompt, history) do
+    [protected_prompt | Enum.map(Enum.reverse(history), &Map.get(&1, :content, ""))]
+    |> Enum.find_value(fn content ->
+      case Regex.run(@email_token, content) do
+        [email_token] -> {:ok, email_token}
+        nil -> nil
+      end
+    end)
   end
 
   defp build_customer_script(protected_prompt, email_token, vault) do
@@ -66,7 +83,20 @@ defmodule ObscuraJidoExample.DemoScript do
   defp build_missing_identifier_script(protected_prompt) do
     Jido.AI.Test.expect_react do
       Jido.AI.Test.user(protected_prompt)
-      Jido.AI.Test.answer("Provide a customer email so I can run the support lookup.")
+
+      Jido.AI.Test.answer(
+        "Identify the synthetic customer through the trusted application so I can run the support lookup."
+      )
+    end
+  end
+
+  defp build_out_of_scope_script(protected_prompt) do
+    Jido.AI.Test.expect_react do
+      Jido.AI.Test.user(protected_prompt)
+
+      Jido.AI.Test.answer(
+        "This demo is limited to synthetic customer and support case questions."
+      )
     end
   end
 

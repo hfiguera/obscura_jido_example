@@ -133,8 +133,13 @@
           </form>
         </section>
 
-        <div id="conversation" class="conversation-body" aria-live="polite">
-          <div :if={@messages == [] && !@running?} class="empty-conversation">
+        <div
+          id="conversation"
+          class="conversation-body"
+          aria-live="polite"
+          phx-hook="ConversationScroll"
+        >
+          <div :if={@turns == [] && !@running?} class="empty-conversation">
             <div class="empty-icon"><.icon name="hero-command-line" /></div>
             <h2>No agent run yet</h2>
             <p>Raw identifiers remain inside the trusted session boundary.</p>
@@ -143,13 +148,20 @@
             </button>
           </div>
 
-          <div :for={message <- @messages} class={["message", message.role]}>
-            <span>{message.label}</span>
-            <div class="message-content">{message.content}</div>
+          <div :for={turn <- @turns} id={"conversation-turn-#{turn.id}"} class="conversation-turn">
+            <div class="message user">
+              <span>Trusted request</span>
+              <div class="message-content">{turn.trusted_prompt}</div>
+            </div>
+
+            <div class="message assistant">
+              <span>Trusted UI response</span>
+              <div class="message-content">{turn.display_html}</div>
+            </div>
           </div>
 
           <div :if={@running? && @live_request} class="message user live-request">
-            <span>Protected request</span>
+            <span>Protected request · in flight</span>
             <div class="message-content">{@live_request}</div>
           </div>
 
@@ -296,6 +308,7 @@
             <span>Provider-visible payload</span>
             <span class="safe-label"><.icon name="hero-check-circle-solid" /> Tokenized</span>
           </div>
+          <p class="provider-context-note">{provider_context_summary(assigns)}</p>
           <pre id="protected-payload">{protected_payload(assigns)}</pre>
         </section>
 
@@ -309,16 +322,16 @@
 
         <section class="vault-strip">
           <div>
-            <span>Session vault</span>
-            <strong>{@vault_size} mappings</strong>
+            <span>Private conversation</span>
+            <strong>{conversation_summary(assigns)}</strong>
           </div>
           <button
-            id="clear-vault"
+            id="new-conversation"
             type="button"
-            phx-click="clear_vault"
+            phx-click="new_conversation"
             disabled={@running? || is_nil(@vault)}
-            title="Clear session vault"
-            aria-label="Clear session vault"
+            title="Start a new conversation and clear session mappings"
+            aria-label="Start a new conversation and clear session mappings"
           >
             <.icon name="hero-trash" />
           </button>
