@@ -81,7 +81,7 @@ tools. Only the model response is scripted.
 The default model is `openai:gpt-5.6-luna`. Override it with any ReqLLM model
 identifier that supports tool calls.
 
-For a local demonstration, enter a key in the OpenAI credentials panel. The
+For a local demonstration, enter a key in the OpenAI access panel. The
 form sends it through a CSRF-protected HTTP request whose parameters are
 filtered from Phoenix logs. The key is copied into process-owned memory,
 expires after 30 minutes of inactivity, and is never written to the session

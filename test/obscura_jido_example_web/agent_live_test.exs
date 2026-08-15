@@ -295,6 +295,12 @@ defmodule ObscuraJidoExampleWeb.AgentLiveTest do
 
     assert has_element?(view, ~s(button[phx-value-mode="openai"][disabled]))
     assert html =~ ~s(id="openai-key-form")
+    assert html =~ "Session-only access"
+    assert has_element?(view, ~s(label[for="openai-api-key"]), "API key")
+    assert has_element?(view, ~s(#openai-api-key[aria-label="OpenAI API key"]))
+    assert has_element?(view, ~s(.credential-submit[aria-label="Enable OpenAI"]), "Enable")
+    refute html =~ "OpenAI credentials"
+    refute html =~ "Add a session key"
     refute html =~ ~s(id="clear-openai-key-form")
   end
 

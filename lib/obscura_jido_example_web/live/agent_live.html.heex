@@ -54,9 +54,9 @@
 
         <section class="credential-panel" aria-labelledby="openai-credential-title">
           <div class="credential-copy">
-            <span class="credential-kicker">OpenAI credentials</span>
+            <span class="credential-kicker">OpenAI</span>
             <strong id="openai-credential-title">
-              {if @openai_session?, do: "Session key ready", else: "Add a session key"}
+              {if @openai_session?, do: "Session key ready", else: "Session-only access"}
             </strong>
           </div>
 
@@ -73,12 +73,13 @@
               value={Plug.CSRFProtection.get_csrf_token()}
             />
             <div id="openai-secret-control" class="secret-control" phx-hook="SecretInput">
-              <label for="openai-api-key">OpenAI API key</label>
+              <label for="openai-api-key">API key</label>
               <div class="secret-field">
                 <input
                   id="openai-api-key"
                   name="openai_api_key"
                   type="password"
+                  aria-label="OpenAI API key"
                   required
                   disabled={@running?}
                   minlength="8"
@@ -103,9 +104,15 @@
                 </button>
               </div>
             </div>
-            <button type="submit" class="credential-submit" disabled={@running?}>
+            <button
+              type="submit"
+              class="credential-submit"
+              aria-label="Enable OpenAI"
+              title="Enable OpenAI"
+              disabled={@running?}
+            >
               <.icon name="hero-key" />
-              <span>Enable OpenAI</span>
+              <span>Enable</span>
             </button>
           </form>
 
