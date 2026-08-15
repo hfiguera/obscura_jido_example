@@ -149,6 +149,13 @@ defmodule ObscuraJidoExampleWeb.AgentLiveTest do
 
     assert html =~ "Privacy-safe support agent"
     assert html =~ "Session boundary ready"
+    assert has_element?(view, ~s(textarea[phx-hook="ComposerInput"]))
+
+    assert has_element?(
+             view,
+             ~s(.run-command[title="Send message"][aria-label="Send message"]),
+             "Send"
+           )
 
     view
     |> form("#agent-form", agent: %{prompt: @prompt})
@@ -188,7 +195,13 @@ defmodule ObscuraJidoExampleWeb.AgentLiveTest do
     assert html =~ ~s(aria-hidden="true")
     assert has_element?(view, "#openai-api-key[disabled]")
     assert has_element?(view, "#openai-key-form button[type=submit][disabled]")
-    assert has_element?(view, ".run-command.running[disabled]")
+
+    assert has_element?(
+             view,
+             ~s(.run-command.running[disabled][title="Agent is working"][aria-label="Working"]),
+             "Working"
+           )
+
     refute html =~ "rachel.chen@example.test"
 
     send(runner, {:continue_runner, :requesting})

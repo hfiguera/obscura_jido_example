@@ -102,11 +102,65 @@ const ConversationScroll = {
   },
 }
 
+const ComposerInput = {
+  mounted() {
+    this.handleKeydown = event => {
+      if (event.key !== "Enter" || event.isComposing || event.keyCode === 229 || event.repeat) return
+      if (event.shiftKey && !event.metaKey && !event.ctrlKey) return
+
+      event.preventDefault()
+
+      if (this.el.disabled || this.el.value.trim() === "") return
+      this.el.form?.requestSubmit()
+    }
+
+    this.el.addEventListener("keydown", this.handleKeydown)
+    this.focusOnDesktop()
+  },
+
+  beforeUpdate() {
+    this.wasDisabled = this.el.disabled
+  },
+
+  updated() {
+    if (this.wasDisabled && !this.el.disabled) this.focusOnDesktop()
+  },
+
+  destroyed() {
+    if (this.focusTimer) window.clearTimeout(this.focusTimer)
+    this.el.removeEventListener("keydown", this.handleKeydown)
+  },
+
+  focusOnDesktop() {
+    const mobileDevice = navigator.userAgentData?.mobile === true ||
+      /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+
+    if (!mobileDevice) {
+      if (this.focusTimer) window.clearTimeout(this.focusTimer)
+
+      this.focusTimer = window.setTimeout(() => {
+        const end = this.el.value.length
+
+        this.el.focus({preventScroll: true})
+        this.el.setSelectionRange(end, end)
+        this.el.scrollTop = this.el.scrollHeight
+      }, 75)
+    }
+  },
+}
+
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: {_csrf_token: csrfToken},
-  hooks: {...colocatedHooks, AutoDismissFlash, ConversationScroll, ElapsedTime, SecretInput},
+  hooks: {
+    ...colocatedHooks,
+    AutoDismissFlash,
+    ComposerInput,
+    ConversationScroll,
+    ElapsedTime,
+    SecretInput,
+  },
 })
 
 // Show progress bar on live navigation and form submits

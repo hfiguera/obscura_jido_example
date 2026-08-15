@@ -237,6 +237,7 @@
             field={@form[:prompt]}
             id={"agent_prompt_#{@prompt_revision}"}
             type="textarea"
+            phx-hook="ComposerInput"
             aria-label="Support request"
             maxlength="4000"
             placeholder="Ask about a synthetic customer or support case"
@@ -251,10 +252,11 @@
               type="submit"
               class={["run-command", @running? && "running"]}
               disabled={@running? || is_nil(@vault)}
-              title="Run agent"
+              title={(@running? && "Agent is working") || "Send message"}
+              aria-label={(@running? && "Working") || "Send message"}
             >
               <.icon name={(@running? && "hero-arrow-path") || "hero-paper-airplane-solid"} />
-              <span>{(@running? && "Running") || "Run agent"}</span>
+              <span>{(@running? && "Working") || "Send"}</span>
             </button>
           </div>
         </.form>
