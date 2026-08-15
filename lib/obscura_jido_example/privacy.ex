@@ -62,7 +62,10 @@ defmodule ObscuraJidoExample.Privacy do
 
   @spec restore(String.t(), GenServer.server()) :: {:ok, String.t()} | {:error, term()}
   def restore(text, vault) when is_binary(text) do
-    Obscura.LLM.rehydrate_response(text, vault: vault)
+    case Obscura.LLM.rehydrate_response(text, vault: vault, unknown: :error) do
+      {:error, {:token_not_found, _shape}} -> {:error, :unknown_provider_token}
+      result -> result
+    end
   end
 
   @spec restore_identifier(String.t(), GenServer.server()) :: {:ok, String.t()} | {:error, atom()}

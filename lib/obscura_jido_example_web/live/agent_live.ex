@@ -383,6 +383,11 @@ defmodule ObscuraJidoExampleWeb.AgentLive do
   defp error_message(:empty_prompt), do: "Enter a request before running the agent."
   defp error_message(:prompt_too_large), do: "The request exceeds the 4 KB boundary."
   defp error_message(:agent_unavailable), do: "The isolated agent process could not start."
+
+  defp error_message(:unknown_provider_token),
+    do:
+      "The model returned an unknown session reference. Identify the synthetic customer and try again."
+
   defp error_message(_reason), do: "The agent run failed without exposing request data."
 
   defp runner_module,

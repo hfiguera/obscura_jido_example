@@ -21,6 +21,15 @@ defmodule ObscuraJidoExample.PrivacyTest do
     assert restored == raw
   end
 
+  test "accepts token-free provider responses", %{vault: vault} do
+    assert {:ok, "How can I help?"} = Privacy.restore("How can I help?", vault)
+  end
+
+  test "rejects provider tokens that have no session mapping", %{vault: vault} do
+    assert {:error, :unknown_provider_token} =
+             Privacy.restore("Provide <<EMAIL_001>>.", vault)
+  end
+
   test "applies an explicit field policy to trusted customer records", %{vault: vault} do
     customer = %{
       customer_ref: "CUS-1",

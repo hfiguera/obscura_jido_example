@@ -3,6 +3,8 @@ defmodule ObscuraJidoExample.AgentRunnerTest do
 
   import ExUnit.CaptureLog
 
+  require Jido.AI.Test
+
   alias ObscuraJidoExample.{AgentRunner, DemoScript, OpenAICredentialStore, Privacy}
 
   @raw_email "rachel.chen@example.test"
@@ -154,6 +156,35 @@ defmodule ObscuraJidoExample.AgentRunnerTest do
 
     refute log =~ key
     refute telemetry =~ key
+  end
+
+  test "rejects a provider-created pseudonym without a vault mapping", %{vault: vault} do
+    key = "sk-test-unknown-provider-token"
+    assert {:ok, credential_ref} = OpenAICredentialStore.put(key)
+    on_exit(fn -> OpenAICredentialStore.delete(credential_ref) end)
+
+    prompt = "Hello, I need some help."
+    llm_opts = answer_options(prompt, "Please provide <<EMAIL_001>>.")
+
+    assert {:error, :unknown_provider_token} =
+             AgentRunner.run(prompt, vault,
+               mode: :openai,
+               credential_ref: credential_ref,
+               llm_opts: llm_opts
+             )
+  end
+
+  defp answer_options(prompt, answer) do
+    try do
+      Jido.AI.Test.expect_react do
+        Jido.AI.Test.user(prompt)
+        Jido.AI.Test.answer(answer)
+      end
+      |> Jido.AI.Test.react_opts()
+      |> Keyword.fetch!(:llm_opts)
+    after
+      Jido.AI.Test.reset_react_scripts()
+    end
   end
 
   defp drain_telemetry(acc) do

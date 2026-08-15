@@ -63,6 +63,12 @@ defmodule ObscuraJidoExampleWeb.AgentLiveTest do
     end
   end
 
+  defmodule UnknownTokenRunner do
+    @moduledoc false
+
+    def run(_prompt, _vault, _opts), do: {:error, :unknown_provider_token}
+  end
+
   @prompt "Find rachel.chen@example.test and summarize her support cases. Her phone is +1 202-555-0188."
 
   test "loading the synthetic case replaces a client-edited prompt", %{conn: conn} do
@@ -215,6 +221,22 @@ defmodule ObscuraJidoExampleWeb.AgentLiveTest do
     assert html =~ "The session OpenAI key is unavailable or expired."
     assert html =~ ~s(id="openai-key-form")
     assert has_element?(view, ~s(button[phx-value-mode="openai"][disabled]))
+  end
+
+  test "does not render a trusted response for an unknown provider token", %{conn: conn} do
+    Application.put_env(:obscura_jido_example, :agent_runner, UnknownTokenRunner)
+    on_exit(fn -> Application.delete_env(:obscura_jido_example, :agent_runner) end)
+
+    {:ok, view, _html} = live(conn, "/")
+
+    view
+    |> form("#agent-form", agent: %{prompt: "Hello, I need some help."})
+    |> render_submit()
+
+    html = render_async(view, 1_000)
+
+    assert html =~ "The model returned an unknown session reference."
+    refute html =~ "Trusted UI response"
   end
 
   test "does not emit Phoenix lifecycle logs for prompts", %{conn: conn} do
