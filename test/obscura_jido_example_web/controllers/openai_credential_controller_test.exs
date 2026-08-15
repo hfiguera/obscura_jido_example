@@ -12,7 +12,7 @@ defmodule ObscuraJidoExampleWeb.OpenAICredentialControllerTest do
     credential_ref = get_session(conn, :openai_credential_ref)
     on_exit(fn -> OpenAICredentialStore.delete(credential_ref) end)
 
-    assert redirected_to(conn) == ~p"/"
+    assert redirected_to(conn) == ~p"/?provider=openai"
     assert is_binary(credential_ref)
     refute credential_ref == @key
     assert OpenAICredentialStore.available?(credential_ref)
@@ -34,7 +34,7 @@ defmodule ObscuraJidoExampleWeb.OpenAICredentialControllerTest do
   test "rejects invalid credentials", %{conn: conn} do
     conn = post(conn, ~p"/session/openai-key", %{"openai_api_key" => "short"})
 
-    assert redirected_to(conn) == ~p"/"
+    assert redirected_to(conn) == ~p"/?provider=openai"
     assert get_session(conn, :openai_credential_ref) == nil
     assert Phoenix.Flash.get(conn.assigns.flash, :error) == "Enter a valid OpenAI API key."
   end

@@ -16,19 +16,19 @@ defmodule ObscuraJidoExampleWeb.OpenAICredentialController do
         |> configure_session(renew: true)
         |> put_session(@session_key, credential_ref)
         |> put_flash(:info, "OpenAI is enabled for this browser session.")
-        |> redirect(to: ~p"/")
+        |> redirect(to: ~p"/?provider=openai")
 
       {:error, :invalid_key} ->
         conn
         |> put_flash(:error, "Enter a valid OpenAI API key.")
-        |> redirect(to: ~p"/")
+        |> redirect(to: ~p"/?provider=openai")
     end
   end
 
   def create(conn, _params) do
     conn
     |> put_flash(:error, "Enter an OpenAI API key.")
-    |> redirect(to: ~p"/")
+    |> redirect(to: ~p"/?provider=openai")
   end
 
   def delete(conn, _params) do

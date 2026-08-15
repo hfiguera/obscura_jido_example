@@ -149,6 +149,17 @@ button:disabled {
   opacity: 0.48;
 }
 
+.visually-hidden {
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  position: absolute;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .agent-app {
   width: 100%;
   min-height: 100vh;
@@ -963,7 +974,8 @@ button:disabled {
   color: var(--green);
 }
 
-.run-command {
+.run-command,
+.stop-command {
   height: 38px;
   padding: 0 15px;
   display: inline-flex;
@@ -982,15 +994,19 @@ button:disabled {
   background: #0e563f;
 }
 
-.run-command.running {
-  opacity: 0.72;
+.stop-command {
+  border-color: #d8aaa5;
+  color: var(--danger);
+  background: white;
 }
 
-.run-command.running svg {
-  animation: tool-spin 1s linear infinite;
+.stop-command:hover {
+  border-color: var(--danger);
+  background: var(--danger-soft);
 }
 
-.run-command svg {
+.run-command svg,
+.stop-command svg {
   width: 16px;
   height: 16px;
 }
@@ -1107,6 +1123,10 @@ button:disabled {
   text-transform: none;
 }
 
+.safe-label.pending {
+  color: var(--muted);
+}
+
 .safe-label svg {
   width: 13px;
   height: 13px;
@@ -1186,6 +1206,41 @@ button:disabled {
   height: 16px;
 }
 
+.reset-confirmation {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.reset-confirmation > span {
+  margin-right: 2px;
+  color: var(--ink);
+  font-weight: 700;
+  text-transform: none;
+}
+
+.reset-confirmation button {
+  width: auto;
+  min-width: 52px;
+  padding: 0 9px;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.reset-confirmation .reset-cancel:hover {
+  border-color: #aeb9b4;
+  color: var(--ink);
+  background: var(--surface-soft);
+}
+
+.reset-confirmation .reset-confirm {
+  border-color: #d8aaa5;
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
 .policy-footer {
   min-height: 48px;
   padding: 12px 22px;
@@ -1239,7 +1294,7 @@ button:disabled {
   }
 
   .conversation-panel {
-    min-height: 650px;
+    min-height: auto;
   }
 
   .panel-heading {
@@ -1252,6 +1307,7 @@ button:disabled {
   .mode-switch,
   .mode-switch button {
     width: 100%;
+    min-height: 44px;
   }
 
   .credential-panel {
@@ -1271,12 +1327,46 @@ button:disabled {
 
   .credential-submit {
     width: 100%;
+    min-height: 44px;
+  }
+
+  .secret-field input {
+    height: 44px;
+    padding-right: 50px;
+  }
+
+  .secret-toggle,
+  .credential-clear {
+    width: 44px;
+    height: 44px;
+  }
+
+  .secret-toggle {
+    top: 0;
+    right: 0;
   }
 
   .conversation-body {
     min-height: 330px;
     max-height: 560px;
     padding: 14px;
+  }
+
+  .conversation-body.empty {
+    min-height: 140px;
+  }
+
+  .conversation-body.empty .empty-icon {
+    display: none;
+  }
+
+  .conversation-body.empty .empty-conversation h2 {
+    font-size: 20px;
+  }
+
+  .conversation-body.empty .empty-conversation p {
+    margin-bottom: 0;
+    font-size: 14px;
   }
 
   .message {
@@ -1313,8 +1403,26 @@ button:disabled {
     flex-direction: column;
   }
 
-  .run-command {
+  .run-command,
+  .stop-command {
     width: 100%;
+    height: 44px;
+  }
+
+  .vault-strip > button {
+    width: 44px;
+    height: 44px;
+  }
+
+  .reset-confirmation button {
+    min-width: 60px;
+    height: 44px;
+  }
+}
+
+@media (max-width: 360px) {
+  .composer .boundary-note {
+    display: none;
   }
 }
 
@@ -1327,7 +1435,6 @@ button:disabled {
   .activity-placeholder span,
   .streaming-cursor,
   .tool-running .tool-icon,
-  .run-command.running svg,
   .agent-progress,
   .live-request {
     animation: none;

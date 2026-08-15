@@ -13,17 +13,19 @@ defmodule ObscuraJidoExampleWeb.AgentLive do
   @max_stream_bytes 64_000
 
   @impl true
-  def mount(_params, session, socket) do
+  def mount(params, session, socket) do
     credential_ref = session_credential_ref(session)
     openai_session? = OpenAICredentialStore.available?(credential_ref)
+    {mode, openai_setup?} = initial_provider(params, openai_session?)
 
     socket =
       socket
       |> assign(:page_title, "Privacy-Safe Jido Agent")
-      |> assign(:mode, :deterministic)
+      |> assign(:mode, mode)
       |> assign(:openai_available?, openai_session?)
       |> assign(:openai_session?, openai_session?)
       |> assign(:openai_credential_ref, openai_session? && credential_ref)
+      |> assign(:openai_setup?, openai_setup?)
       |> assign(:configured_model, AgentRunner.configured_model())
       |> assign(:running?, false)
       |> assign(:result, nil)
@@ -41,6 +43,7 @@ defmodule ObscuraJidoExampleWeb.AgentLive do
       |> assign(:error, nil)
       |> assign(:vault, nil)
       |> assign(:vault_size, 0)
+      |> assign(:confirming_new_conversation?, false)
       |> assign(:prompt_revision, 0)
       |> assign_form(@sample_prompt)
       |> maybe_start_vault()
@@ -48,21 +51,40 @@ defmodule ObscuraJidoExampleWeb.AgentLive do
     {:ok, socket}
   end
 
+  defp initial_provider(%{"provider" => "openai"}, true), do: {:openai, true}
+  defp initial_provider(%{"provider" => "openai"}, false), do: {:deterministic, true}
+  defp initial_provider(_params, _openai_session?), do: {:deterministic, false}
+
   @impl true
   def handle_event("set_mode", %{"mode" => "deterministic"}, socket),
-    do: {:noreply, assign(socket, mode: :deterministic, error: nil)}
+    do:
+      {:noreply,
+       assign(socket,
+         mode: :deterministic,
+         openai_setup?: false,
+         error: nil
+       )}
 
   def handle_event(
         "set_mode",
         %{"mode" => "openai"},
         %{assigns: %{openai_available?: true}} = socket
       ),
-      do: {:noreply, assign(socket, mode: :openai, error: nil)}
+      do:
+        {:noreply,
+         assign(socket,
+           mode: :openai,
+           openai_setup?: true,
+           error: nil
+         )}
 
   def handle_event("set_mode", %{"mode" => "openai"}, socket),
     do:
       {:noreply,
-       assign(socket, error: "Add a session OpenAI key before selecting this provider.")}
+       assign(socket,
+         openai_setup?: true,
+         error: nil
+       )}
 
   def handle_event("use_sample", _params, socket) do
     {:noreply,
@@ -96,6 +118,7 @@ defmodule ObscuraJidoExampleWeb.AgentLive do
         |> assign(:provider_stream, "")
         |> assign(:tool_activity, [])
         |> assign(:error, nil)
+        |> assign(:confirming_new_conversation?, false)
         |> assign_form("")
         |> start_async(:agent_run, fn ->
           runner.run(prompt, vault,
@@ -109,6 +132,28 @@ defmodule ObscuraJidoExampleWeb.AgentLive do
       {:noreply, socket}
     end
   end
+
+  def handle_event("cancel_run", _params, %{assigns: %{running?: true}} = socket) do
+    {:noreply,
+     socket
+     |> cancel_async(:agent_run, {:shutdown, :user_cancelled})
+     |> finish_with_error("Agent run stopped. Your request is ready to send again.")}
+  end
+
+  def handle_event("cancel_run", _params, socket), do: {:noreply, socket}
+
+  def handle_event(
+        "request_new_conversation",
+        _params,
+        %{assigns: %{running?: false, vault: vault}} = socket
+      )
+      when not is_nil(vault),
+      do: {:noreply, assign(socket, :confirming_new_conversation?, true)}
+
+  def handle_event("request_new_conversation", _params, socket), do: {:noreply, socket}
+
+  def handle_event("cancel_new_conversation", _params, socket),
+    do: {:noreply, assign(socket, :confirming_new_conversation?, false)}
 
   def handle_event(
         "new_conversation",
@@ -127,12 +172,17 @@ defmodule ObscuraJidoExampleWeb.AgentLive do
          |> assign(:pending_prompt, nil)
          |> assign(:provider_context_message_count, 0)
          |> assign(:vault_size, 0)
+         |> assign(:confirming_new_conversation?, false)
          |> assign(:error, nil)
          |> update(:prompt_revision, &(&1 + 1))
          |> assign_form("")}
 
       {:error, _reason} ->
-        {:noreply, assign(socket, error: "The session vault could not be cleared.")}
+        {:noreply,
+         assign(socket,
+           confirming_new_conversation?: false,
+           error: "The session vault could not be cleared."
+         )}
     end
   end
 
@@ -182,23 +232,23 @@ defmodule ObscuraJidoExampleWeb.AgentLive do
 
   def handle_async(:agent_run, {:ok, {:error, :openai_unavailable}}, socket) do
     {:noreply,
-     assign(socket,
-       running?: false,
-       run_ref: nil,
-       run_started_at: nil,
-       activity_phase: nil,
+     socket
+     |> assign(
        mode: :deterministic,
        openai_available?: false,
        openai_session?: false,
        openai_credential_ref: nil,
-       pending_prompt: nil,
-       error: "The session OpenAI key is unavailable or expired."
-     )}
+       openai_setup?: true
+     )
+     |> finish_with_error("The session OpenAI key is unavailable or expired.")}
   end
 
   def handle_async(:agent_run, {:ok, {:error, reason}}, socket) do
     {:noreply, finish_with_error(socket, error_message(reason))}
   end
+
+  def handle_async(:agent_run, {:exit, {:shutdown, :user_cancelled}}, socket),
+    do: {:noreply, socket}
 
   def handle_async(:agent_run, {:exit, _reason}, socket) do
     {:noreply, finish_with_error(socket, "The isolated agent run failed safely.")}
@@ -270,14 +320,22 @@ defmodule ObscuraJidoExampleWeb.AgentLive do
   end
 
   defp finish_with_error(socket, message) do
-    assign(socket,
+    prompt = socket.assigns.pending_prompt || ""
+
+    socket
+    |> assign(
       running?: false,
       run_ref: nil,
       run_started_at: nil,
       activity_phase: nil,
       pending_prompt: nil,
+      live_request: nil,
+      provider_stream: "",
+      tool_activity: [],
       error: message
     )
+    |> update(:prompt_revision, &(&1 + 1))
+    |> assign_form(prompt)
   end
 
   defp maybe_start_vault(socket) do
@@ -341,6 +399,22 @@ defmodule ObscuraJidoExampleWeb.AgentLive do
 
   defp provider_payload(%{provider_stream: text}) when is_binary(text) and text != "", do: text
   defp provider_payload(_assigns), do: "No response received"
+
+  defp protected_payload_available?(%{result: result}) when not is_nil(result), do: true
+
+  defp protected_payload_available?(%{live_request: request})
+       when is_binary(request) and request != "",
+       do: true
+
+  defp protected_payload_available?(_assigns), do: false
+
+  defp provider_payload_available?(%{result: result}) when not is_nil(result), do: true
+
+  defp provider_payload_available?(%{provider_stream: text})
+       when is_binary(text) and text != "",
+       do: true
+
+  defp provider_payload_available?(_assigns), do: false
 
   defp provider_context_summary(%{provider_context_message_count: count}) do
     case count do

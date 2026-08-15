@@ -15,9 +15,16 @@
         </div>
       </div>
 
-      <div class="runtime-status">
-        <span class={["status-dot", @vault && "ready"]}></span>
-        <span>{(@vault && "Session boundary ready") || "Connecting boundary"}</span>
+      <div
+        class="runtime-status"
+        role="status"
+        aria-live="polite"
+        aria-label={(@vault && "Session boundary ready") || "Connecting boundary"}
+      >
+        <span class={["status-dot", @vault && "ready"]} aria-hidden="true"></span>
+        <span aria-hidden="true">
+          {(@vault && "Session boundary ready") || "Connecting boundary"}
+        </span>
       </div>
     </header>
 
@@ -35,6 +42,7 @@
               phx-click="set_mode"
               phx-value-mode="deterministic"
               class={@mode == :deterministic && "selected"}
+              aria-pressed={to_string(@mode == :deterministic)}
               disabled={@running?}
             >
               Deterministic
@@ -44,15 +52,27 @@
               phx-click="set_mode"
               phx-value-mode="openai"
               class={@mode == :openai && "selected"}
-              disabled={@running? || !@openai_available?}
-              title={!@openai_available? && "Add an OpenAI API key below to enable this provider"}
+              aria-pressed={to_string(@mode == :openai)}
+              aria-controls="openai-credentials"
+              aria-expanded={to_string(@openai_setup? || @mode == :openai)}
+              aria-describedby={!@openai_available? && "openai-provider-help"}
+              disabled={@running?}
             >
               OpenAI
             </button>
           </div>
+
+          <p :if={!@openai_available?} id="openai-provider-help" class="visually-hidden">
+            Select OpenAI to add a session API key.
+          </p>
         </div>
 
-        <section class="credential-panel" aria-labelledby="openai-credential-title">
+        <section
+          :if={@openai_setup? || @mode == :openai}
+          id="openai-credentials"
+          class="credential-panel"
+          aria-labelledby="openai-credential-title"
+        >
           <div class="credential-copy">
             <span class="credential-kicker">OpenAI</span>
             <strong id="openai-credential-title">
@@ -142,7 +162,7 @@
 
         <div
           id="conversation"
-          class="conversation-body"
+          class={["conversation-body", @turns == [] && !@running? && "empty"]}
           aria-live="polite"
           phx-hook="ConversationScroll"
         >
@@ -256,14 +276,27 @@
               <span>Obscura protects the request before Jido receives it</span>
             </div>
             <button
+              :if={!@running?}
               type="submit"
-              class={["run-command", @running? && "running"]}
-              disabled={@running? || is_nil(@vault)}
-              title={(@running? && "Agent is working") || "Send message"}
-              aria-label={(@running? && "Working") || "Send message"}
+              class="run-command"
+              disabled={is_nil(@vault)}
+              title="Send message"
+              aria-label="Send message"
             >
-              <.icon name={(@running? && "hero-arrow-path") || "hero-paper-airplane-solid"} />
-              <span>{(@running? && "Working") || "Send"}</span>
+              <.icon name="hero-paper-airplane-solid" />
+              <span>Send</span>
+            </button>
+            <button
+              :if={@running?}
+              id="cancel-agent-run"
+              type="button"
+              phx-click="cancel_run"
+              class="stop-command"
+              title="Stop agent run"
+              aria-label="Stop agent run"
+            >
+              <.icon name="hero-stop-solid" />
+              <span>Stop</span>
             </button>
           </div>
         </.form>
@@ -323,7 +356,14 @@
         <section class="payload-inspector">
           <div class="section-label">
             <span>Provider-visible payload</span>
-            <span class="safe-label"><.icon name="hero-check-circle-solid" /> Tokenized</span>
+            <span class={["safe-label", !protected_payload_available?(assigns) && "pending"]}>
+              <.icon name={
+                if protected_payload_available?(assigns),
+                  do: "hero-check-circle-solid",
+                  else: "hero-clock"
+              } />
+              {if protected_payload_available?(assigns), do: "Tokenized", else: "Awaiting run"}
+            </span>
           </div>
           <p class="provider-context-note">{provider_context_summary(assigns)}</p>
           <pre id="protected-payload">{protected_payload(assigns)}</pre>
@@ -332,7 +372,14 @@
         <section class="payload-inspector answer-inspector">
           <div class="section-label">
             <span>Provider answer</span>
-            <span class="safe-label"><.icon name="hero-check-circle-solid" /> Tokenized</span>
+            <span class={["safe-label", !provider_payload_available?(assigns) && "pending"]}>
+              <.icon name={
+                if provider_payload_available?(assigns),
+                  do: "hero-check-circle-solid",
+                  else: "hero-clock"
+              } />
+              {if provider_payload_available?(assigns), do: "Tokenized", else: "Awaiting response"}
+            </span>
           </div>
           <pre id="provider-answer">{provider_payload(assigns)}</pre>
         </section>
@@ -342,10 +389,35 @@
             <span>Private conversation</span>
             <strong>{conversation_summary(assigns)}</strong>
           </div>
+          <div
+            :if={@confirming_new_conversation?}
+            class="reset-confirmation"
+            role="group"
+            aria-labelledby="reset-confirmation-label"
+          >
+            <span id="reset-confirmation-label">Clear conversation?</span>
+            <button
+              id="cancel-new-conversation"
+              type="button"
+              phx-click="cancel_new_conversation"
+              class="reset-cancel"
+            >
+              Keep
+            </button>
+            <button
+              id="confirm-new-conversation"
+              type="button"
+              phx-click="new_conversation"
+              class="reset-confirm"
+            >
+              Clear
+            </button>
+          </div>
           <button
+            :if={!@confirming_new_conversation?}
             id="new-conversation"
             type="button"
-            phx-click="new_conversation"
+            phx-click="request_new_conversation"
             disabled={@running? || is_nil(@vault)}
             title="Start a new conversation and clear session mappings"
             aria-label="Start a new conversation and clear session mappings"

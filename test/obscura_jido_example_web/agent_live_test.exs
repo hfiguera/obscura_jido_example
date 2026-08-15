@@ -150,6 +150,10 @@ defmodule ObscuraJidoExampleWeb.AgentLiveTest do
     assert html =~ "Privacy-safe support agent"
     assert html =~ "Session boundary ready"
     assert has_element?(view, ~s(textarea[phx-hook="ComposerInput"]))
+    assert has_element?(view, ~s(.runtime-status[role="status"][aria-live="polite"]))
+    assert has_element?(view, ".safe-label.pending", "Awaiting run")
+    assert has_element?(view, ".safe-label.pending", "Awaiting response")
+    refute has_element?(view, "#openai-credentials")
 
     assert has_element?(
              view,
@@ -168,6 +172,7 @@ defmodule ObscuraJidoExampleWeb.AgentLiveTest do
     assert html =~ "Rachel Chen"
     assert html =~ "2 read-only tools completed"
     assert html =~ "3 mappings"
+    assert has_element?(view, ".safe-label:not(.pending)", "Tokenized")
     refute has_element?(view, "#use-synthetic-case")
   end
 
@@ -193,13 +198,14 @@ defmodule ObscuraJidoExampleWeb.AgentLiveTest do
     assert html =~ "&lt;&lt;EMAIL_001&gt;&gt;"
     assert html =~ ~s(phx-hook="ElapsedTime")
     assert html =~ ~s(aria-hidden="true")
-    assert has_element?(view, "#openai-api-key[disabled]")
-    assert has_element?(view, "#openai-key-form button[type=submit][disabled]")
+    refute has_element?(view, "#openai-credentials")
+    assert has_element?(view, ".safe-label:not(.pending)", "Tokenized")
+    assert has_element?(view, ".safe-label.pending", "Awaiting response")
 
     assert has_element?(
              view,
-             ~s(.run-command.running[disabled][title="Agent is working"][aria-label="Working"]),
-             "Working"
+             ~s(#cancel-agent-run[title="Stop agent run"][aria-label="Stop agent run"]),
+             "Stop"
            )
 
     refute html =~ "rachel.chen@example.test"
@@ -215,6 +221,7 @@ defmodule ObscuraJidoExampleWeb.AgentLiveTest do
     html = render_until(view, "Receiving the answer")
     assert html =~ "Provider response · tokenized"
     assert has_element?(view, ~s(.streaming-response[aria-live="off"]))
+    refute has_element?(view, ".safe-label.pending")
     assert html =~ "Found **&lt;&lt;EMAIL_"
     refute html =~ "rachel.chen@example.test"
 
@@ -232,6 +239,37 @@ defmodule ObscuraJidoExampleWeb.AgentLiveTest do
     assert html =~ "<strong>rachel.chen@example.test</strong>"
     assert html =~ "Found **&lt;&lt;EMAIL_001&gt;&gt;**."
     refute html =~ ~s(id="active-agent-run")
+  end
+
+  test "stops a running agent and restores the submitted request", %{conn: conn} do
+    Application.put_env(:obscura_jido_example, :agent_runner, PausedRunner)
+    Application.put_env(:obscura_jido_example, :streaming_test_pid, self())
+
+    on_exit(fn ->
+      Application.delete_env(:obscura_jido_example, :agent_runner)
+      Application.delete_env(:obscura_jido_example, :streaming_test_pid)
+    end)
+
+    {:ok, view, _html} = live(conn, "/")
+
+    view
+    |> form("#agent-form", agent: %{prompt: @prompt})
+    |> render_submit()
+
+    assert_receive {:runner_paused, :requesting, runner}, 1_000
+    assert Process.alive?(runner)
+
+    html = view |> element("#cancel-agent-run") |> render_click()
+
+    assert html =~ "Agent run stopped. Your request is ready to send again."
+    assert html =~ @prompt
+    assert html =~ ~s(id="agent_prompt_1")
+    assert has_element?(view, ".run-command", "Send")
+    refute has_element?(view, "#active-agent-run")
+    refute has_element?(view, "#cancel-agent-run")
+    refute has_element?(view, ".safe-label:not(.pending)", "Tokenized")
+
+    refute Process.alive?(runner)
   end
 
   test "keeps real protected history and clears it with the session vault", %{conn: conn} do
@@ -278,6 +316,17 @@ defmodule ObscuraJidoExampleWeb.AgentLiveTest do
     assert has_element?(view, "#conversation-turn-2")
 
     html = view |> element("#new-conversation") |> render_click()
+    assert html =~ "Clear conversation?"
+    assert html =~ "2 turns · 3 mappings"
+    assert has_element?(view, "#confirm-new-conversation", "Clear")
+    assert has_element?(view, "#cancel-new-conversation", "Keep")
+
+    html = view |> element("#cancel-new-conversation") |> render_click()
+    refute html =~ "Clear conversation?"
+    assert html =~ "2 turns · 3 mappings"
+
+    view |> element("#new-conversation") |> render_click()
+    html = view |> element("#confirm-new-conversation") |> render_click()
     assert html =~ "0 turns · 0 mappings"
     refute html =~ "rachel.chen@example.test"
     refute html =~ follow_up
@@ -290,15 +339,35 @@ defmodule ObscuraJidoExampleWeb.AgentLiveTest do
     assert render_async(view, 1_000) =~ "1 turn · 1 mapping"
   end
 
-  test "keeps OpenAI disabled when credentials are absent", %{conn: conn} do
+  test "reveals OpenAI setup only when requested", %{conn: conn} do
     {:ok, view, html} = live(conn, "/")
 
-    assert has_element?(view, ~s(button[phx-value-mode="openai"][disabled]))
+    assert has_element?(
+             view,
+             ~s(button[phx-value-mode="deterministic"][aria-pressed="true"])
+           )
+
+    assert has_element?(
+             view,
+             ~s(button[phx-value-mode="openai"][aria-pressed="false"][aria-expanded="false"][aria-describedby="openai-provider-help"])
+           )
+
+    refute html =~ ~s(id="openai-credentials")
+    refute html =~ ~s(id="openai-key-form")
+
+    html =
+      view
+      |> element(~s(button[phx-value-mode="openai"]))
+      |> render_click()
+
+    assert html =~ ~s(id="openai-credentials")
     assert html =~ ~s(id="openai-key-form")
     assert html =~ "Session-only access"
     assert has_element?(view, ~s(label[for="openai-api-key"]), "API key")
     assert has_element?(view, ~s(#openai-api-key[aria-label="OpenAI API key"]))
     assert has_element?(view, ~s(.credential-submit[aria-label="Enable OpenAI"]), "Enable")
+    assert has_element?(view, ~s(button[phx-value-mode="openai"][aria-expanded="true"]))
+    assert has_element?(view, ~s(button[phx-value-mode="deterministic"][aria-pressed="true"]))
     refute html =~ "OpenAI credentials"
     refute html =~ "Add a session key"
     refute html =~ ~s(id="clear-openai-key-form")
@@ -313,10 +382,44 @@ defmodule ObscuraJidoExampleWeb.AgentLiveTest do
     {:ok, view, html} = live(conn, "/")
 
     refute has_element?(view, ~s(button[phx-value-mode="openai"][disabled]))
+    refute html =~ ~s(id="openai-credentials")
+
+    html =
+      view
+      |> element(~s(button[phx-value-mode="openai"]))
+      |> render_click()
+
+    assert has_element?(view, ~s(button[phx-value-mode="openai"][aria-pressed="true"]))
     assert html =~ "Session key ready"
     assert html =~ ~s(id="clear-openai-key-form")
     refute html =~ ~s(id="openai-key-form")
     refute html =~ key
+  end
+
+  test "keeps OpenAI selected after the credential redirect", %{conn: conn} do
+    key = "sk-test-liveview-redirect-credential"
+    assert {:ok, credential_ref} = OpenAICredentialStore.put(key)
+    on_exit(fn -> OpenAICredentialStore.delete(credential_ref) end)
+
+    conn = init_test_session(conn, %{"openai_credential_ref" => credential_ref})
+    {:ok, view, html} = live(conn, "/?provider=openai")
+
+    assert has_element?(view, ~s(button[phx-value-mode="openai"][aria-pressed="true"]))
+    assert has_element?(view, ~s(button[phx-value-mode="deterministic"][aria-pressed="false"]))
+    assert html =~ "Session key ready"
+    assert html =~ ~s(id="clear-openai-key-form")
+    refute html =~ key
+  end
+
+  test "reopens setup without activating OpenAI when the credential is unavailable", %{
+    conn: conn
+  } do
+    {:ok, view, html} = live(conn, "/?provider=openai")
+
+    assert has_element?(view, ~s(button[phx-value-mode="deterministic"][aria-pressed="true"]))
+    assert has_element?(view, ~s(button[phx-value-mode="openai"][aria-pressed="false"]))
+    assert html =~ ~s(id="openai-key-form")
+    assert html =~ "Session-only access"
   end
 
   test "fails closed when a session credential expires while the page remains open", %{conn: conn} do
@@ -340,7 +443,10 @@ defmodule ObscuraJidoExampleWeb.AgentLiveTest do
 
     assert html =~ "The session OpenAI key is unavailable or expired."
     assert html =~ ~s(id="openai-key-form")
-    assert has_element?(view, ~s(button[phx-value-mode="openai"][disabled]))
+    assert html =~ @prompt
+    assert html =~ ~s(id="agent_prompt_1")
+    assert has_element?(view, ~s(button[phx-value-mode="deterministic"][aria-pressed="true"]))
+    refute has_element?(view, ~s(button[phx-value-mode="openai"][disabled]))
   end
 
   test "does not render a trusted response for an unknown provider token", %{conn: conn} do
@@ -356,6 +462,8 @@ defmodule ObscuraJidoExampleWeb.AgentLiveTest do
     html = render_async(view, 1_000)
 
     assert html =~ "The model returned an unknown session reference."
+    assert html =~ "Hello, I need some help."
+    assert html =~ ~s(id="agent_prompt_1")
     refute html =~ "Trusted UI response"
   end
 
