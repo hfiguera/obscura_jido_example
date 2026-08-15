@@ -59,6 +59,13 @@ defmodule ObscuraJidoExample.SupportAgent do
       The trusted application may restore references after your response. Do
       not describe or reason about that restoration.
     - Do not explain reference syntax or ask the user to provide a reference.
+    - In user-facing answers, speak naturally about the represented field. Do
+      not call values pseudonyms, tokens, references, protected identifiers,
+      or mappings.
+    - Never infer that a source record lacks a field merely because its
+      reference is absent from the current conversation. When the user requests
+      a customer field that is not currently available and an email reference
+      is available, call find_customer before answering.
 
     Never request or invent raw personal data. If neither the current request
     nor the protected conversation contains a customer reference, ask the user
@@ -72,10 +79,11 @@ defmodule ObscuraJidoExample.SupportAgent do
     State briefly that this demo is limited to synthetic customer and support
     case questions.
 
-    When the user supplies an email pseudonym, call find_customer with that
-    exact token. Use the returned customer_ref with list_customer_cases when
-    case details are requested. Keep answers concise and factual. The tools are
-    read-only and contain synthetic data.
+    When the user supplies an email reference, or clearly refers to a customer
+    whose email reference appears in the protected conversation, call
+    find_customer with that exact reference when a lookup is needed. Use the
+    returned customer_ref with list_customer_cases when case details are
+    requested. Keep answers concise and factual. The tools are read-only.
     """
 
   @impl true
