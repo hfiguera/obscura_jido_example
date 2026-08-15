@@ -1,0 +1,334 @@
+<Layouts.app flash={@flash}>
+  <div class="agent-app">
+    <header class="app-header">
+      <div class="brand-lockup">
+        <div class="brand-mark" aria-hidden="true">
+          <.icon name="hero-shield-check-solid" />
+        </div>
+        <div>
+          <div class="brand-line">
+            <strong>Obscura</strong>
+            <span class="brand-join">+</span>
+            <strong>Jido</strong>
+          </div>
+          <p>Privacy-safe support agent</p>
+        </div>
+      </div>
+
+      <div class="runtime-status">
+        <span class={["status-dot", @vault && "ready"]}></span>
+        <span>{(@vault && "Session boundary ready") || "Connecting boundary"}</span>
+      </div>
+    </header>
+
+    <div class="workspace">
+      <section class="conversation-panel" aria-labelledby="conversation-title">
+        <div class="panel-heading">
+          <div>
+            <span class="eyebrow">Synthetic support desk</span>
+            <h1 id="conversation-title">Agent conversation</h1>
+          </div>
+
+          <div class="mode-switch" role="group" aria-label="Agent provider">
+            <button
+              type="button"
+              phx-click="set_mode"
+              phx-value-mode="deterministic"
+              class={@mode == :deterministic && "selected"}
+              disabled={@running?}
+            >
+              Deterministic
+            </button>
+            <button
+              type="button"
+              phx-click="set_mode"
+              phx-value-mode="openai"
+              class={@mode == :openai && "selected"}
+              disabled={@running? || !@openai_available?}
+              title={!@openai_available? && "Add an OpenAI API key below to enable this provider"}
+            >
+              OpenAI
+            </button>
+          </div>
+        </div>
+
+        <section class="credential-panel" aria-labelledby="openai-credential-title">
+          <div class="credential-copy">
+            <span class="credential-kicker">OpenAI credentials</span>
+            <strong id="openai-credential-title">
+              {if @openai_session?, do: "Session key ready", else: "Add a session key"}
+            </strong>
+          </div>
+
+          <form
+            :if={!@openai_session?}
+            id="openai-key-form"
+            action={~p"/session/openai-key"}
+            method="post"
+            class="credential-form"
+          >
+            <input
+              type="hidden"
+              name="_csrf_token"
+              value={Plug.CSRFProtection.get_csrf_token()}
+            />
+            <div id="openai-secret-control" class="secret-control" phx-hook="SecretInput">
+              <label for="openai-api-key">OpenAI API key</label>
+              <div class="secret-field">
+                <input
+                  id="openai-api-key"
+                  name="openai_api_key"
+                  type="password"
+                  required
+                  disabled={@running?}
+                  minlength="8"
+                  maxlength="512"
+                  autocomplete="off"
+                  autocapitalize="none"
+                  spellcheck="false"
+                  data-secret-input
+                />
+                <button
+                  type="button"
+                  class="secret-toggle"
+                  aria-label="Show OpenAI API key"
+                  aria-controls="openai-api-key"
+                  aria-pressed="false"
+                  title="Show OpenAI API key"
+                  disabled={@running?}
+                  data-secret-toggle
+                >
+                  <.icon name="hero-eye" class="secret-show-icon" />
+                  <.icon name="hero-eye-slash" class="secret-hide-icon" />
+                </button>
+              </div>
+            </div>
+            <button type="submit" class="credential-submit" disabled={@running?}>
+              <.icon name="hero-key" />
+              <span>Enable OpenAI</span>
+            </button>
+          </form>
+
+          <form
+            :if={@openai_session?}
+            id="clear-openai-key-form"
+            action={~p"/session/openai-key"}
+            method="post"
+          >
+            <input type="hidden" name="_method" value="delete" />
+            <input
+              type="hidden"
+              name="_csrf_token"
+              value={Plug.CSRFProtection.get_csrf_token()}
+            />
+            <button
+              type="submit"
+              class="credential-clear"
+              aria-label="Clear session OpenAI key"
+              title="Clear session OpenAI key"
+              disabled={@running?}
+            >
+              <.icon name="hero-x-mark" />
+            </button>
+          </form>
+        </section>
+
+        <div id="conversation" class="conversation-body" aria-live="polite">
+          <div :if={@messages == [] && !@running?} class="empty-conversation">
+            <div class="empty-icon"><.icon name="hero-command-line" /></div>
+            <h2>No agent run yet</h2>
+            <p>Raw identifiers remain inside the trusted session boundary.</p>
+            <button type="button" phx-click="use_sample" class="text-command">
+              Load synthetic case <.icon name="hero-arrow-down-left" />
+            </button>
+          </div>
+
+          <div :for={message <- @messages} class={["message", message.role]}>
+            <span>{message.label}</span>
+            <div class="message-content">{message.content}</div>
+          </div>
+
+          <div :if={@running? && @live_request} class="message user live-request">
+            <span>Protected request</span>
+            <div class="message-content">{@live_request}</div>
+          </div>
+
+          <section :if={@running?} id="active-agent-run" class="agent-progress">
+            <header class="agent-progress-header">
+              <div class="activity-loader" aria-hidden="true">
+                <span></span><span></span><span></span>
+                <span></span><span></span><span></span>
+                <span></span><span></span><span></span>
+              </div>
+              <div class="activity-copy" role="status" aria-live="polite" aria-atomic="true">
+                <span>Jido agent</span>
+                <strong>{phase_title(@activity_phase)}</strong>
+                <small>{phase_description(@activity_phase)}</small>
+              </div>
+              <span
+                id="run-elapsed"
+                class="elapsed-time"
+                phx-hook="ElapsedTime"
+                phx-update="ignore"
+                data-started-at={@run_started_at}
+                aria-hidden="true"
+              >
+                0.0 s
+              </span>
+            </header>
+
+            <div :if={@tool_activity != []} class="tool-activity" aria-label="Tool activity">
+              <div
+                :for={tool <- @tool_activity}
+                class={["tool-row", "tool-#{tool.status}"]}
+              >
+                <span class="tool-icon" aria-hidden="true">
+                  <.icon name={tool_icon(tool.status)} />
+                </span>
+                <span class="tool-name">{tool_label(tool.name)}</span>
+                <span class="tool-status">{tool_status_label(tool.status)}</span>
+              </div>
+            </div>
+
+            <div :if={@provider_stream == ""} class="activity-placeholder" aria-hidden="true">
+              <span></span><span></span><span></span>
+            </div>
+
+            <div
+              :if={@provider_stream != ""}
+              class="streaming-response"
+              aria-live="off"
+            >
+              <span>Provider response · tokenized</span>
+              <div id="streaming-answer" class="streaming-text">
+                {@provider_stream}<span class="streaming-cursor" aria-hidden="true"></span>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <div :if={@error} class="error-banner" role="alert">
+          <.icon name="hero-exclamation-triangle" />
+          <span>{@error}</span>
+        </div>
+
+        <.form for={@form} id="agent-form" phx-submit="run" class="composer">
+          <.input
+            field={@form[:prompt]}
+            type="textarea"
+            aria-label="Support request"
+            maxlength="4000"
+            placeholder="Ask about a synthetic customer or support case"
+            disabled={@running?}
+          />
+          <div class="composer-footer">
+            <div class="boundary-note">
+              <.icon name="hero-lock-closed" />
+              <span>Obscura protects the request before Jido receives it</span>
+            </div>
+            <button
+              type="submit"
+              class={["run-command", @running? && "running"]}
+              disabled={@running? || is_nil(@vault)}
+              title="Run agent"
+            >
+              <.icon name={(@running? && "hero-arrow-path") || "hero-paper-airplane-solid"} />
+              <span>{(@running? && "Running") || "Run agent"}</span>
+            </button>
+          </div>
+        </.form>
+      </section>
+
+      <aside class="evidence-panel" aria-labelledby="evidence-title">
+        <div class="panel-heading evidence-heading">
+          <div>
+            <span class="eyebrow">Boundary evidence</span>
+            <h2 id="evidence-title">Request path</h2>
+          </div>
+          <span :if={@result} class="run-time">{@result.elapsed_ms} ms</span>
+        </div>
+
+        <ol class="boundary-path">
+          <li class={boundary_step_class(assigns, :trusted_ui)}>
+            <span class="step-index">1</span>
+            <div>
+              <strong>Trusted UI</strong>
+              <small>{if @running? || @result,
+                do: "Raw request accepted",
+                else: "Awaiting request"}</small>
+            </div>
+          </li>
+          <li class={boundary_step_class(assigns, :obscura)}>
+            <span class="step-index">2</span>
+            <div>
+              <strong>Obscura boundary</strong>
+              <small>{if @live_request || @result,
+                do: "Identifiers pseudonymized",
+                else: "Awaiting request"}</small>
+            </div>
+          </li>
+          <li class={boundary_step_class(assigns, :agent)}>
+            <span class="step-index">3</span>
+            <div>
+              <strong>Jido agent</strong>
+              <small>{(@result && @result.model) || provider_label(@mode, @configured_model)}</small>
+            </div>
+          </li>
+          <li class={boundary_step_class(assigns, :tools)}>
+            <span class="step-index">4</span>
+            <div>
+              <strong>Trusted tools</strong>
+              <small>{live_tool_summary(assigns)}</small>
+            </div>
+          </li>
+          <li class={boundary_step_class(assigns, :restoration)}>
+            <span class="step-index">5</span>
+            <div>
+              <strong>Local restoration</strong>
+              <small>{if @result, do: "Known tokens restored", else: "No restored response"}</small>
+            </div>
+          </li>
+        </ol>
+
+        <section class="payload-inspector">
+          <div class="section-label">
+            <span>Provider-visible payload</span>
+            <span class="safe-label"><.icon name="hero-check-circle-solid" /> Tokenized</span>
+          </div>
+          <pre id="protected-payload">{protected_payload(assigns)}</pre>
+        </section>
+
+        <section class="payload-inspector answer-inspector">
+          <div class="section-label">
+            <span>Provider answer</span>
+            <span class="safe-label"><.icon name="hero-check-circle-solid" /> Tokenized</span>
+          </div>
+          <pre id="provider-answer">{provider_payload(assigns)}</pre>
+        </section>
+
+        <section class="vault-strip">
+          <div>
+            <span>Session vault</span>
+            <strong>{@vault_size} mappings</strong>
+          </div>
+          <button
+            id="clear-vault"
+            type="button"
+            phx-click="clear_vault"
+            disabled={@running? || is_nil(@vault)}
+            title="Clear session vault"
+            aria-label="Clear session vault"
+          >
+            <.icon name="hero-trash" />
+          </button>
+        </section>
+
+        <footer class="policy-footer">
+          <span>Read-only tools</span>
+          <span>No raw telemetry payloads</span>
+          <span>Synthetic records</span>
+        </footer>
+      </aside>
+    </div>
+  </div>
+</Layouts.app>
