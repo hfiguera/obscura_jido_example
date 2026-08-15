@@ -143,9 +143,6 @@
             <div class="empty-icon"><.icon name="hero-command-line" /></div>
             <h2>No agent run yet</h2>
             <p>Raw identifiers remain inside the trusted session boundary.</p>
-            <button type="button" phx-click="use_sample" class="text-command">
-              Load synthetic case <.icon name="hero-arrow-down-left" />
-            </button>
           </div>
 
           <div :for={turn <- @turns} id={"conversation-turn-#{turn.id}"} class="conversation-turn">
@@ -158,6 +155,17 @@
               <span>Trusted UI response</span>
               <div class="message-content">{turn.display_html}</div>
             </div>
+          </div>
+
+          <div :if={sample_suggestion?(assigns)} class="sample-suggestion">
+            <button
+              id="use-synthetic-case"
+              type="button"
+              phx-click="use_sample"
+              class="text-command"
+            >
+              Try the synthetic support case <.icon name="hero-arrow-down-left" />
+            </button>
           </div>
 
           <div :if={@running? && @live_request} class="message user live-request">

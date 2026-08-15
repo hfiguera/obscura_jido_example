@@ -534,6 +534,11 @@ button:disabled {
   height: 14px;
 }
 
+.sample-suggestion {
+  align-self: center;
+  padding: 2px 0 6px;
+}
+
 .message {
   min-width: 0;
   width: min(78%, 720px);

@@ -29,6 +29,7 @@ defmodule ObscuraJidoExampleWeb.AgentLive do
       |> assign(:result, nil)
       |> assign(:turns, [])
       |> assign(:turn_sequence, 0)
+      |> assign(:conversation_used_tools?, false)
       |> assign(:pending_prompt, nil)
       |> assign(:provider_context_message_count, 0)
       |> assign(:run_ref, nil)
@@ -122,6 +123,7 @@ defmodule ObscuraJidoExampleWeb.AgentLive do
          |> assign(:result, nil)
          |> assign(:turns, [])
          |> assign(:turn_sequence, 0)
+         |> assign(:conversation_used_tools?, false)
          |> assign(:pending_prompt, nil)
          |> assign(:provider_context_message_count, 0)
          |> assign(:vault_size, 0)
@@ -164,6 +166,8 @@ defmodule ObscuraJidoExampleWeb.AgentLive do
        result: result,
        turns: Conversation.append(socket.assigns.turns, turn),
        turn_sequence: turn_sequence,
+       conversation_used_tools?:
+         socket.assigns.conversation_used_tools? or result.tool_steps != [],
        pending_prompt: nil,
        run_ref: nil,
        run_started_at: nil,
@@ -218,7 +222,11 @@ defmodule ObscuraJidoExampleWeb.AgentLive do
 
   defp apply_progress(socket, {:tool_started, name}) when is_binary(name) do
     tool = %{name: name, status: :running}
-    assign(socket, :tool_activity, socket.assigns.tool_activity ++ [tool])
+
+    assign(socket,
+      tool_activity: socket.assigns.tool_activity ++ [tool],
+      conversation_used_tools?: true
+    )
   end
 
   defp apply_progress(socket, {:tool_completed, name, status})
@@ -348,6 +356,17 @@ defmodule ObscuraJidoExampleWeb.AgentLive do
     mapping_label = if vault_size == 1, do: "1 mapping", else: "#{vault_size} mappings"
     "#{turn_label} · #{mapping_label}"
   end
+
+  defp sample_suggestion?(%{
+         turns: [_turn | _rest],
+         running?: false,
+         conversation_used_tools?: false,
+         form: form
+       }) do
+    Phoenix.HTML.Form.input_value(form, :prompt) != @sample_prompt
+  end
+
+  defp sample_suggestion?(_assigns), do: false
 
   defp boundary_step_class(assigns, :trusted_ui) do
     if assigns.running? or assigns.result, do: "complete"

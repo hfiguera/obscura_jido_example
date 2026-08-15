@@ -109,19 +109,37 @@ defmodule ObscuraJidoExampleWeb.AgentLiveTest do
 
   @prompt "Find rachel.chen@example.test and summarize her support cases. Her phone is +1 202-555-0188."
 
-  test "loading the synthetic case replaces a client-edited prompt", %{conn: conn} do
+  test "offers the synthetic case only after a conversation has not used tools", %{conn: conn} do
+    Application.put_env(:obscura_jido_example, :agent_runner, HistoryRunner)
+    Application.put_env(:obscura_jido_example, :history_test_pid, self())
+
+    on_exit(fn ->
+      Application.delete_env(:obscura_jido_example, :agent_runner)
+      Application.delete_env(:obscura_jido_example, :history_test_pid)
+    end)
+
     {:ok, view, html} = live(conn, "/")
 
     assert html =~ ~s(id="agent_prompt_0")
     assert html =~ @prompt
+    refute has_element?(view, "#use-synthetic-case")
+
+    view
+    |> form("#agent-form", agent: %{prompt: "Hello"})
+    |> render_submit()
+
+    assert_receive {:runner_history, "Hello", []}, 1_000
+    assert render_async(view, 1_000) =~ "1 turn · 1 mapping"
+    assert has_element?(view, "#use-synthetic-case", "Try the synthetic support case")
 
     html =
       view
-      |> element("button", "Load synthetic case")
+      |> element("#use-synthetic-case")
       |> render_click()
 
     assert html =~ ~s(id="agent_prompt_1")
     assert html =~ @prompt
+    refute has_element?(view, "#use-synthetic-case")
   end
 
   test "runs the deterministic agent and exposes both sides of the privacy boundary", %{
@@ -143,6 +161,7 @@ defmodule ObscuraJidoExampleWeb.AgentLiveTest do
     assert html =~ "Rachel Chen"
     assert html =~ "2 read-only tools completed"
     assert html =~ "3 mappings"
+    refute has_element?(view, "#use-synthetic-case")
   end
 
   test "renders real progress, tool activity, and tokenized streaming before restoration", %{
