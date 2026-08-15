@@ -4,6 +4,12 @@ A Phoenix LiveView demonstration of a tool-using Jido support agent whose
 OpenAI boundary receives pseudonyms for configured identifiers instead of
 their raw values.
 
+[![Obscura and Jido privacy boundary demonstration](docs/media/obscura-jido-preview.gif)](docs/media/obscura-jido-demo.mp4)
+
+*Raw identifiers remain inside the trusted application. Jido and OpenAI
+operate on stable pseudonyms, and known values are restored only in the
+trusted UI. Select the preview to watch the complete demonstration.*
+
 The example uses synthetic customer records and read-only tools. It shows how
 to combine:
 
