@@ -215,6 +215,7 @@
         <.form for={@form} id="agent-form" phx-submit="run" class="composer">
           <.input
             field={@form[:prompt]}
+            id={"agent_prompt_#{@prompt_revision}"}
             type="textarea"
             aria-label="Support request"
             maxlength="4000"

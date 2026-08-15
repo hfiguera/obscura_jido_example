@@ -36,6 +36,7 @@ defmodule ObscuraJidoExampleWeb.AgentLive do
       |> assign(:error, nil)
       |> assign(:vault, nil)
       |> assign(:vault_size, 0)
+      |> assign(:prompt_revision, 0)
       |> assign_form(@sample_prompt)
       |> maybe_start_vault()
 
@@ -58,8 +59,12 @@ defmodule ObscuraJidoExampleWeb.AgentLive do
       {:noreply,
        assign(socket, error: "Add a session OpenAI key before selecting this provider.")}
 
-  def handle_event("use_sample", _params, socket),
-    do: {:noreply, assign_form(socket, @sample_prompt)}
+  def handle_event("use_sample", _params, socket) do
+    {:noreply,
+     socket
+     |> update(:prompt_revision, &(&1 + 1))
+     |> assign_form(@sample_prompt)}
+  end
 
   def handle_event("run", %{"agent" => %{"prompt" => prompt}}, socket) do
     if socket.assigns.running? or is_nil(socket.assigns.vault) do

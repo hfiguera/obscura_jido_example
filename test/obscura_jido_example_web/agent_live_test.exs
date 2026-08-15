@@ -65,6 +65,21 @@ defmodule ObscuraJidoExampleWeb.AgentLiveTest do
 
   @prompt "Find rachel.chen@example.test and summarize her support cases. Her phone is +1 202-555-0188."
 
+  test "loading the synthetic case replaces a client-edited prompt", %{conn: conn} do
+    {:ok, view, html} = live(conn, "/")
+
+    assert html =~ ~s(id="agent_prompt_0")
+    assert html =~ @prompt
+
+    html =
+      view
+      |> element("button", "Load synthetic case")
+      |> render_click()
+
+    assert html =~ ~s(id="agent_prompt_1")
+    assert html =~ @prompt
+  end
+
   test "runs the deterministic agent and exposes both sides of the privacy boundary", %{
     conn: conn
   } do
