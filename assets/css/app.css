@@ -525,6 +525,7 @@ button:disabled {
 }
 
 .message {
+  min-width: 0;
   width: min(78%, 720px);
   padding: 14px 16px;
   border-radius: 6px;
@@ -539,6 +540,7 @@ button:disabled {
 }
 
 .message-content {
+  min-width: 0;
   margin: 0;
   overflow-wrap: anywhere;
   font-size: 16px;
@@ -573,6 +575,29 @@ button:disabled {
   background: var(--surface-soft);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.9em;
+}
+
+.message-content pre {
+  max-width: 100%;
+  margin: 10px 0;
+  padding: 12px 14px;
+  overflow-x: auto;
+  border: 1px solid #dce3df;
+  border-radius: 4px;
+  background: #f6faf8;
+  line-height: 1.5;
+}
+
+.message-content pre code {
+  display: block;
+  width: max-content;
+  min-width: 100%;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: 0.86em;
+  white-space: pre;
+  overflow-wrap: normal;
 }
 
 .message.user {

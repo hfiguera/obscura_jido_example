@@ -12,6 +12,22 @@ defmodule ObscuraJidoExampleWeb.MarkdownTest do
     refute html =~ "**"
   end
 
+  test "preserves fenced Elixir code as a block" do
+    markdown = """
+    ```elixir
+    defmodule Fibonacci do
+      def fib(0), do: 0
+    end
+    ```
+    """
+
+    html = Markdown.to_safe_html(markdown) |> safe_html()
+
+    assert html =~ "<pre><code"
+    assert html =~ "defmodule Fibonacci do\n  def fib(0), do: 0\nend"
+    assert html =~ "</code></pre>"
+  end
+
   test "escapes embedded HTML and does not create unsafe links" do
     markdown = "<script>alert('x')</script> [unsafe](javascript:alert('x'))"
     html = Markdown.to_safe_html(markdown) |> safe_html()
