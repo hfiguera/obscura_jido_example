@@ -60,6 +60,7 @@ defmodule ObscuraJidoExample.AgentRunnerTest do
     assert {:tool_started, "list_customer_cases"} in events
     assert {:tool_completed, "list_customer_cases", :ok} in events
     assert {:provider_text, result.provider_answer} in events
+    assert Enum.count(events, &match?({:provider_text, _text}, &1)) == 1
     assert List.last(events) == {:phase, :restoring}
 
     assert Enum.all?(events, &safe_progress_event?/1)

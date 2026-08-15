@@ -134,9 +134,10 @@ defmodule ObscuraJidoExample.AgentRunner do
   defp run_request(pid, prompt, request_opts, timeout, progress_to) do
     with {:ok, %{request: request, events: event_stream}} <-
            SupportAgent.ask_stream(pid, prompt, request_opts),
-         :ok <- collect_events(event_stream, progress_to),
+         {:ok, provider_text_emitted?} <- collect_events(event_stream, progress_to),
          {:ok, answer} <- SupportAgent.await(request, timeout: timeout),
-         {:ok, text} <- answer_text(answer) do
+         {:ok, text} <- answer_text(answer),
+         :ok <- ensure_provider_text_progress(progress_to, text, provider_text_emitted?) do
       {:ok, text, collect_tool_audits([])}
     else
       _ -> {:error, :agent_failed}
@@ -144,17 +145,25 @@ defmodule ObscuraJidoExample.AgentRunner do
   end
 
   defp collect_events(stream, progress_to) do
-    stream
-    |> Enum.reduce(stream_state(), fn event, state -> consume_event(event, state, progress_to) end)
-    |> flush_deltas(progress_to)
+    state =
+      stream
+      |> Enum.reduce(stream_state(), fn event, state ->
+        consume_event(event, state, progress_to)
+      end)
+      |> flush_deltas(progress_to)
 
-    :ok
+    {:ok, state.provider_text_emitted?}
   rescue
     _ -> {:error, :agent_failed}
   end
 
   defp stream_state do
-    %{pending_deltas: [], pending_bytes: 0, last_flush_ms: monotonic_ms()}
+    %{
+      pending_deltas: [],
+      pending_bytes: 0,
+      last_flush_ms: monotonic_ms(),
+      provider_text_emitted?: false
+    }
   end
 
   defp consume_event(%{kind: :request_started}, state, progress_to) do
@@ -184,13 +193,14 @@ defmodule ObscuraJidoExample.AgentRunner do
         text when is_binary(text) and text != "" ->
           emit_progress_to(progress_to, {:phase, :streaming})
           emit_progress_to(progress_to, {:provider_text, text})
+          %{state | provider_text_emitted?: true}
 
         _empty_or_invalid ->
-          :ok
+          state
       end
+    else
+      state
     end
-
-    state
   end
 
   defp consume_event(%{kind: :tool_started, tool_name: name}, state, progress_to) do
@@ -215,6 +225,13 @@ defmodule ObscuraJidoExample.AgentRunner do
   end
 
   defp consume_event(_event, state, progress_to), do: flush_deltas(state, progress_to)
+
+  defp ensure_provider_text_progress(_progress_to, _text, true), do: :ok
+
+  defp ensure_provider_text_progress(progress_to, text, false) do
+    emit_progress_to(progress_to, {:phase, :streaming})
+    emit_progress_to(progress_to, {:provider_text, text})
+  end
 
   defp buffer_delta(state, delta, progress_to) when is_binary(delta) and delta != "" do
     state = %{
