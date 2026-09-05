@@ -11,7 +11,11 @@
             <span class="brand-join">+</span>
             <strong>Jido</strong>
           </div>
-          <p>Privacy-safe support agent</p>
+          <p id="privacy-profile">
+            {if @privacy_profile == :efficient,
+              do: "Efficient CPU · English names, locations, and identifiers",
+              else: "Fast · deterministic identifiers"}
+          </p>
         </div>
       </div>
 
@@ -19,11 +23,11 @@
         class="runtime-status"
         role="status"
         aria-live="polite"
-        aria-label={(@vault && "Session boundary ready") || "Connecting boundary"}
+        aria-label={(@vault && "Session vault ready") || "Connecting vault"}
       >
         <span class={["status-dot", @vault && "ready"]} aria-hidden="true"></span>
         <span aria-hidden="true">
-          {(@vault && "Session boundary ready") || "Connecting boundary"}
+          {(@vault && "Session vault ready") || "Connecting vault"}
         </span>
       </div>
     </header>

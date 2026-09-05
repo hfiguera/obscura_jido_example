@@ -27,6 +27,7 @@ defmodule ObscuraJidoExampleWeb.AgentLive do
       |> assign(:openai_credential_ref, openai_session? && credential_ref)
       |> assign(:openai_setup?, openai_setup?)
       |> assign(:configured_model, AgentRunner.configured_model())
+      |> assign(:privacy_profile, ObscuraJidoExample.PrivacyProfile.name())
       |> assign(:running?, false)
       |> assign(:result, nil)
       |> assign(:turns, [])
@@ -507,6 +508,10 @@ defmodule ObscuraJidoExampleWeb.AgentLive do
     count = length(steps)
     "#{count} read-only #{if count == 1, do: "tool", else: "tools"} completed"
   end
+
+  defp error_message(:privacy_unavailable),
+    do:
+      "The efficient privacy runtime is not ready. Check provisioned assets and restart the application after correcting the cause."
 
   defp error_message(:empty_prompt), do: "Enter a request before running the agent."
   defp error_message(:prompt_too_large), do: "The request exceeds the 4 KB boundary."

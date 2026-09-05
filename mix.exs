@@ -40,7 +40,7 @@ defmodule ObscuraJidoExample.MixProject do
   # Type `mix help deps` for examples and options.
   defp deps do
     [
-      {:obscura, "~> 0.1.3"},
+      {:obscura, "~> 0.2.0"},
       {:jido, "~> 2.3"},
       {:jido_action, "~> 2.3"},
       {:jido_ai, "~> 2.3"},

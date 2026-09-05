@@ -2,25 +2,22 @@ defmodule ObscuraJidoExample.Privacy do
   @moduledoc """
   Owns the privacy boundary between trusted application code and the agent.
 
-  Free-form text uses Obscura's deterministic profile. Domain records use an
+  Free-form text uses the configured fast or efficient profile. Domain records use an
   explicit field policy so names returned by trusted tools are also tokenized.
   """
 
   alias Obscura.Vault
+  alias ObscuraJidoExample.PrivacyProfile
 
   @text_entities [:email, :phone, :credit_card, :us_ssn, :iban, :ip_address]
-  @text_options [
-    profile: :fast,
-    entities: @text_entities,
-    operators: %{default: %{type: :pseudonymize}}
-  ]
 
   @spec protect_prompt(String.t(), GenServer.server()) :: {:ok, String.t()} | {:error, term()}
   def protect_prompt(prompt, vault) when is_binary(prompt) do
     messages = [%{role: :user, content: prompt}]
 
-    with {:ok, [%{content: protected}], ^vault} <-
-           Obscura.LLM.redact_messages(messages, Keyword.put(@text_options, :vault, vault)) do
+    with {:ok, options} <- text_options(vault),
+         {:ok, [%{content: protected}], ^vault} <-
+           Obscura.LLM.redact_messages(messages, options) do
       {:ok, protected}
     end
   end
@@ -85,9 +82,24 @@ defmodule ObscuraJidoExample.Privacy do
   end
 
   defp protect_text(text, vault) do
-    case Obscura.redact(text, Keyword.put(@text_options, :vault, vault)) do
-      {:ok, result} -> {:ok, result.text}
-      {:error, reason} -> {:error, reason}
+    with {:ok, options} <- text_options(vault),
+         {:ok, result} <- Obscura.redact(text, options) do
+      {:ok, result.text}
+    end
+  end
+
+  defp text_options(vault) do
+    with {:ok, profile} <- PrivacyProfile.reference() do
+      entities =
+        if profile == :fast, do: @text_entities, else: @text_entities ++ [:person, :location]
+
+      {:ok,
+       [
+         profile: profile,
+         entities: entities,
+         vault: vault,
+         operators: %{default: %{type: :pseudonymize}}
+       ]}
     end
   end
 

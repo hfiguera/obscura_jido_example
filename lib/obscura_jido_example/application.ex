@@ -7,18 +7,20 @@ defmodule ObscuraJidoExample.Application do
 
   @impl true
   def start(_type, _args) do
-    children = [
-      ObscuraJidoExampleWeb.Telemetry,
-      {DNSCluster,
-       query: Application.get_env(:obscura_jido_example, :dns_cluster_query) || :ignore},
-      {Phoenix.PubSub, name: ObscuraJidoExample.PubSub},
-      ObscuraJidoExample.OpenAICredentialStore,
-      ObscuraJidoExample.Jido,
-      # Start a worker by calling: ObscuraJidoExample.Worker.start_link(arg)
-      # {ObscuraJidoExample.Worker, arg},
-      # Start to serve requests, typically the last entry
-      ObscuraJidoExampleWeb.Endpoint
-    ]
+    children =
+      ObscuraJidoExample.PrivacyProfile.children() ++
+        [
+          ObscuraJidoExampleWeb.Telemetry,
+          {DNSCluster,
+           query: Application.get_env(:obscura_jido_example, :dns_cluster_query) || :ignore},
+          {Phoenix.PubSub, name: ObscuraJidoExample.PubSub},
+          ObscuraJidoExample.OpenAICredentialStore,
+          ObscuraJidoExample.Jido,
+          # Start a worker by calling: ObscuraJidoExample.Worker.start_link(arg)
+          # {ObscuraJidoExample.Worker, arg},
+          # Start to serve requests, typically the last entry
+          ObscuraJidoExampleWeb.Endpoint
+        ]
 
     # See https://elixir.hexdocs.pm/Supervisor.html
     # for other strategies and supported options
