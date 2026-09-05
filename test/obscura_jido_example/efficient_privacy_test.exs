@@ -68,7 +68,16 @@ defmodule ObscuraJidoExample.EfficientPrivacyTest do
   end
 
   test "model limits and runtime shutdown return errors without fast fallback", %{vault: vault} do
-    assert {:error, _} = Privacy.protect_prompt(String.duplicate("x", 1_048_577), vault)
+    # Keep tokens short so OTP 27's regex engine reaches the native byte-limit check.
+    oversized = String.duplicate("x ", 524_288) <> "x"
+
+    assert {:error, {:recognizer_failed, :spacy_cpu, :spacy_input_limit}} =
+             Privacy.protect_prompt(oversized, vault)
+
+    assert {:error, :prompt_too_large} =
+             AgentRunner.run(String.duplicate("x", 1_048_577), vault, mode: :deterministic)
+
+    assert Privacy.vault_size(vault) == 0
     assert {:ok, _} = Privacy.protect_prompt("Alice Smith lives in London.", vault)
     assert :ok = stop_supervised(PrivacyProfile)
     assert {:error, :privacy_unavailable} = Privacy.protect_prompt("alice@example.test", vault)
