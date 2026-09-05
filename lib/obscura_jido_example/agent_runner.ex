@@ -456,6 +456,7 @@ defmodule ObscuraJidoExample.AgentRunner do
               :invalid_mode,
               :openai_unavailable,
               :agent_unavailable,
+              :privacy_unavailable,
               :agent_timeout,
               :unknown_provider_token,
               :invalid_history

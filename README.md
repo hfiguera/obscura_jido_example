@@ -76,6 +76,46 @@ Open [http://localhost:4000](http://localhost:4000). The deterministic mode
 works without credentials and still exercises the real Jido runtime and both
 tools. Only the model response is scripted.
 
+## Obscura 0.2.0 and optional native CPU recognition
+
+This example consumes `{:obscura, "~> 0.2.0"}` from Hex. The default
+`OBSCURA_JIDO_PROFILE=fast` keeps setup free of model assets. To also recognize
+English person/location spans in prompts and case notes, provision `:efficient`
+on Apple Silicon macOS or glibc Linux x86-64/ARM64.
+
+Install PCRE2 (`brew install pcre2` on macOS) or the Linux runtime libraries
+(`apt-get install curl libopenblas0-pthread libpcre2-8-0`), and uv **0.12.1**:
+
+```sh
+mix obscura.efficient.install --allow-download
+OBSCURA_JIDO_PROFILE=efficient mix phx.server
+```
+
+The application supervisor starts one reusable native CPU runtime. Set
+`OBSCURA_JIDO_WORKERS=2` to use two workers (allowed range 1–4; default 1).
+`OBSCURA_EFFICIENT_ASSET_DIR` selects an already provisioned asset directory.
+No Python, Nx, Bumblebee, GPU, or network is needed for native inference.
+Prebuilt Linux binaries require glibc 2.36+, LP64 OpenBLAS, and PCRE2; model
+assets occupy about 408 MiB. See the [installation and contract guide](https://hexdocs.pm/obscura/0.2.0/efficient.html).
+
+The runtime is shared across requests while vaults remain session-scoped.
+Select the profile at application startup so a conversation keeps a consistent
+recognition policy. Requests fail before the agent receives a prompt if native
+preparation is incomplete or fails; model errors and saturation also return
+errors, with no fallback to `:fast`. Correct missing assets before restarting
+the application. Provisioning never runs from a browser request.
+
+Known customer fields retain their explicit protection. Native recognition can
+miss names/locations or select inaccurate spans; it does not provide exhaustive
+PII protection. Existing email/phone pseudonyms and local rehydration continue
+to work in either mode.
+
+After provisioning, run the real native boundary tests:
+
+```sh
+OBSCURA_EFFICIENT_TEST=1 mix test test/obscura_jido_example/efficient_privacy_test.exs
+```
+
 ## Use OpenAI
 
 The default model is `openai:gpt-5.6-luna`. Override it with any ReqLLM model
@@ -122,7 +162,7 @@ The test suite verifies that:
 
 This is an architecture demonstration, not a production support system. The
 records are synthetic, tools are read-only, and deterministic mode does not
-measure model quality. Free-form prompts use the `:fast` profile for configured
+measure model quality. By default, free-form prompts use the `:fast` profile for configured
 structured entities such as email addresses and phone numbers; they do not
 provide general contextual name detection. Names in the synthetic tool records
 are protected by an explicit field policy instead. The simplified case lookup

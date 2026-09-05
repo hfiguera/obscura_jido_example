@@ -151,10 +151,10 @@ defmodule ObscuraJidoExampleWeb.AgentLiveTest do
   test "runs the deterministic agent and exposes both sides of the privacy boundary", %{
     conn: conn
   } do
-    {:ok, view, html} = live(conn, "/")
+    {:ok, view, _html} = live(conn, "/")
 
-    assert html =~ "Privacy-safe support agent"
-    assert html =~ "Session boundary ready"
+    assert has_element?(view, "#privacy-profile", "Fast · deterministic identifiers")
+    assert has_element?(view, ~s([role="status"][aria-label="Session vault ready"]))
     assert has_element?(view, ~s(textarea[phx-hook="ComposerInput"]))
     assert has_element?(view, ~s(.runtime-status[role="status"][aria-live="polite"]))
     assert has_element?(view, ".safe-label.pending", "Awaiting run")

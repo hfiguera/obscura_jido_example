@@ -1,5 +1,22 @@
 import Config
 
+privacy_profile =
+  case System.get_env("OBSCURA_JIDO_PROFILE", "fast") do
+    "fast" -> :fast
+    "efficient" -> :efficient
+    _ -> raise "OBSCURA_JIDO_PROFILE must be fast or efficient"
+  end
+
+privacy_workers =
+  case Integer.parse(System.get_env("OBSCURA_JIDO_WORKERS", "1")) do
+    {workers, ""} when workers in 1..4 -> workers
+    _ -> raise "OBSCURA_JIDO_WORKERS must be an integer from 1 to 4"
+  end
+
+config :obscura_jido_example,
+  privacy_profile: privacy_profile,
+  privacy_prepare_options: [workers: privacy_workers]
+
 # config/runtime.exs is executed for all environments, including
 # during releases. It is executed after compilation and before the
 # system starts, so it is typically used to load production configuration
